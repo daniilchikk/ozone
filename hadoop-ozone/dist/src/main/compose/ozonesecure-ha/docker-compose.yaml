@@ -210,11 +210,12 @@ services:
       - ./krb5.conf:/etc/krb5.conf
     ports:
       - 9878:9878
+      - 15555:15555
     env_file:
       - ./docker-config
     command: ["/opt/hadoop/bin/ozone","s3g"]
     environment:
-      OZONE_OPTS:
+      OZONE_OPTS: -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=15555
     networks:
       ozone_net:
         ipv4_address: 172.25.0.114
