@@ -56,3 +56,5 @@ execute_robot_test s3g httpfs
 
 export SCM=scm2.org
 execute_robot_test s3g admincli
+
+execute_robot_test s3g scmha/scm-create-container.robot
