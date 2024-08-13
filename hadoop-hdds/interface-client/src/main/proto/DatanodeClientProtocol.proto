@@ -77,6 +77,8 @@ package hadoop.hdds.datanode;
  *  18. CopyContainer - Copies a container from a remote machine.
  *
  *  19. FinalizeBlock - Finalize block request from client.
+ *
+ *  20. VerifyBlock - Verify block request from client.
  */
 
 enum Type {
@@ -108,6 +110,8 @@ enum Type {
 
   FinalizeBlock = 21;
   Echo = 22;
+
+  VerifyBlock = 23;
 }
 
 
@@ -217,6 +221,8 @@ message ContainerCommandRequestProto {
 
   optional   FinalizeBlockRequestProto finalizeBlock = 25;
   optional   EchoRequestProto echo = 26;
+
+  optional VerifyBlockRequestProto verifyBlock = 27;
 }
 
 message ContainerCommandResponseProto {
@@ -250,6 +256,8 @@ message ContainerCommandResponseProto {
 
   optional   FinalizeBlockResponseProto finalizeBlock = 22;
   optional   EchoResponseProto echo = 23;
+
+  optional VerifyBlockResponseProto verifyBlock = 24;
 }
 
 message ContainerDataProto {
@@ -544,6 +552,19 @@ message SendContainerRequest {
 }
 
 message SendContainerResponse {
+}
+
+message VerifyBlockRequestProto {
+  required DatanodeBlockID blockID = 1;
+}
+
+message VerifyBlockResponseProto {
+  enum Reason {
+    MISSING_CHUNK = 1;
+    CORRUPTED_CHUNK = 2;
+  }
+  required bool valid = 1;
+  optional Reason reason = 2;
 }
 
 service XceiverClientProtocolService {
