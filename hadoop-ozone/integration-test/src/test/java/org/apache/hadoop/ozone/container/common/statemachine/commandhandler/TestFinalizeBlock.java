@@ -77,6 +77,8 @@ import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_STALENODE_INTER
 import static org.apache.hadoop.ozone.container.common.impl.ContainerLayoutVersion.FILE_PER_BLOCK;
 import static org.apache.hadoop.ozone.container.common.impl.ContainerLayoutVersion.FILE_PER_CHUNK;
 import static org.apache.hadoop.ozone.container.common.statemachine.DatanodeConfiguration.CONTAINER_SCHEMA_V3_ENABLED;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -91,8 +93,8 @@ public class TestFinalizeBlock {
   private MiniOzoneCluster cluster;
   private OzoneConfiguration conf;
   private ObjectStore objectStore;
-  private static String volumeName = UUID.randomUUID().toString();
-  private static String bucketName = UUID.randomUUID().toString();
+  private static final String VOLUME_NAME = UUID.randomUUID().toString();
+  private static final String BUCKET_NAME = UUID.randomUUID().toString();
 
   public static Stream<Arguments> dnLayoutParams() {
     return Stream.of(
@@ -106,8 +108,7 @@ public class TestFinalizeBlock {
   private void setup(boolean enableSchemaV3, ContainerLayoutVersion version) throws Exception {
     conf = new OzoneConfiguration();
     conf.set(OZONE_SCM_CONTAINER_SIZE, "1GB");
-    conf.setStorageSize(OZONE_DATANODE_RATIS_VOLUME_FREE_SPACE_MIN,
-        0, StorageUnit.MB);
+    conf.setStorageSize(OZONE_DATANODE_RATIS_VOLUME_FREE_SPACE_MIN, 0, StorageUnit.MB);
     conf.setBoolean(HddsConfigKeys.HDDS_SCM_SAFEMODE_PIPELINE_CREATION, false);
     conf.setTimeDuration(OZONE_SCM_HEARTBEAT_PROCESS_INTERVAL, 100, TimeUnit.MILLISECONDS);
     conf.setTimeDuration(HDDS_HEARTBEAT_INTERVAL, 1, SECONDS);
@@ -118,23 +119,21 @@ public class TestFinalizeBlock {
     conf.setBoolean(CONTAINER_SCHEMA_V3_ENABLED, enableSchemaV3);
     conf.setEnum(ScmConfigKeys.OZONE_SCM_CONTAINER_LAYOUT_KEY, version);
 
-    DatanodeConfiguration datanodeConfiguration = conf.getObject(
-        DatanodeConfiguration.class);
+    DatanodeConfiguration datanodeConfiguration = conf.getObject(DatanodeConfiguration.class);
     datanodeConfiguration.setBlockDeletionInterval(Duration.ofMillis(100));
     conf.setFromObject(datanodeConfiguration);
     ScmConfig scmConfig = conf.getObject(ScmConfig.class);
     scmConfig.setBlockDeletionInterval(Duration.ofMillis(100));
     conf.setFromObject(scmConfig);
 
-    cluster = MiniOzoneCluster.newBuilder(conf)
-        .setNumDatanodes(1).build();
+    cluster = MiniOzoneCluster.newBuilder(conf).setNumDatanodes(1).build();
     cluster.waitForClusterToBeReady();
     cluster.waitForPipelineTobeReady(ONE, 30000);
 
     client = OzoneClientFactory.getRpcClient(conf);
     objectStore = client.getObjectStore();
-    objectStore.createVolume(volumeName);
-    objectStore.getVolume(volumeName).createBucket(bucketName);
+    objectStore.createVolume(VOLUME_NAME);
+    objectStore.getVolume(VOLUME_NAME).createBucket(BUCKET_NAME);
   }
 
   @AfterEach
@@ -151,36 +150,40 @@ public class TestFinalizeBlock {
 
   @ParameterizedTest
   @MethodSource("dnLayoutParams")
-  public void testFinalizeBlock(boolean enableSchemaV3, ContainerLayoutVersion version)
-      throws Exception {
+  public void testFinalizeBlock(boolean enableSchemaV3, ContainerLayoutVersion version) throws Exception {
     setup(enableSchemaV3, version);
     String keyName = UUID.randomUUID().toString();
     // create key
     createKey(keyName);
 
-    ContainerID containerId = cluster.getStorageContainerManager()
-        .getContainerManager().getContainers().get(0).containerID();
+    ContainerID containerId =
+        cluster.getStorageContainerManager().getContainerManager().getContainers().get(0).containerID();
 
-    OmKeyArgs keyArgs = new OmKeyArgs.Builder().setVolumeName(volumeName)
-        .setBucketName(bucketName).setKeyName(keyName).setDataSize(0)
+    OmKeyArgs keyArgs = new OmKeyArgs.Builder()
+        .setVolumeName(VOLUME_NAME)
+        .setBucketName(BUCKET_NAME)
+        .setKeyName(keyName)
+        .setDataSize(0)
         .build();
     List<OmKeyLocationInfoGroup> omKeyLocationInfoGroupList =
         cluster.getOzoneManager().lookupKey(keyArgs).getKeyLocationVersions();
 
-    ContainerInfo container = cluster.getStorageContainerManager()
-        .getContainerManager().getContainer(containerId);
-    Pipeline pipeline = cluster.getStorageContainerManager()
-        .getPipelineManager().getPipeline(container.getPipelineID());
+    ContainerInfo container = cluster.getStorageContainerManager().getContainerManager().getContainer(containerId);
+    Pipeline pipeline =
+        cluster.getStorageContainerManager().getPipelineManager().getPipeline(container.getPipelineID());
 
     XceiverClientManager xceiverClientManager = new XceiverClientManager(conf);
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
+    XceiverClientSpi xceiverClient = xceiverClientManager.acquireClient(pipeline);
 
     // Before finalize block WRITE chunk on the same block should pass through
     ContainerProtos.ContainerCommandRequestProto request =
-        ContainerTestHelper.getWriteChunkRequest(pipeline, (
-            new BlockID(containerId.getId(), omKeyLocationInfoGroupList.get(0)
-                .getLocationList().get(0).getLocalID())), 100);
+        ContainerTestHelper
+            .getWriteChunkRequest(
+                pipeline,
+                new BlockID(
+                    containerId.getId(),
+                    omKeyLocationInfoGroupList.get(0).getLocationList().get(0).getLocalID()),
+                100);
     xceiverClient.sendCommand(request);
 
     // Before finalize block PUT block on the same block should pass through
@@ -189,18 +192,18 @@ public class TestFinalizeBlock {
 
     // Now Finalize Block
     request = getFinalizeBlockRequest(omKeyLocationInfoGroupList, container);
-    ContainerProtos.ContainerCommandResponseProto response =
-        xceiverClient.sendCommand(request);
+    ContainerProtos.ContainerCommandResponseProto response = xceiverClient.sendCommand(request);
 
-    assertTrue(response.getFinalizeBlock()
-        .getBlockData().getBlockID().getLocalID()
-        == omKeyLocationInfoGroupList.get(0)
-        .getLocationList().get(0).getLocalID());
+    assertEquals(
+        response.getFinalizeBlock().getBlockData().getBlockID().getLocalID(),
+        omKeyLocationInfoGroupList.get(0).getLocationList().get(0).getLocalID());
 
-    assertTrue(((KeyValueContainerData)getContainerfromDN(
-        cluster.getHddsDatanodes().get(0),
-        containerId.getId()).getContainerData())
-        .getFinalizedBlockSet().size() == 1);
+    assertEquals(
+        1,
+        ((KeyValueContainerData) getContainerFromDN(
+            cluster.getHddsDatanodes().get(0),
+            containerId.getId()).getContainerData()
+        ).getFinalizedBlockSet().size());
 
     testRejectPutAndWriteChunkAfterFinalizeBlock(containerId, pipeline, xceiverClient, omKeyLocationInfoGroupList);
     testFinalizeBlockReloadAfterDNRestart(containerId);
@@ -215,22 +218,27 @@ public class TestFinalizeBlock {
     }
 
     // After restart DN, finalizeBlock should be loaded into memory
-    assertTrue(((KeyValueContainerData)
-        getContainerfromDN(cluster.getHddsDatanodes().get(0),
-            containerId.getId()).getContainerData())
-        .getFinalizedBlockSet().size() == 1);
+    assertEquals(1,
+        ((KeyValueContainerData) getContainerFromDN(
+            cluster.getHddsDatanodes().get(0),
+            containerId.getId()).getContainerData()
+        ).getFinalizedBlockSet().size());
   }
 
   private void testFinalizeBlockClearAfterCloseContainer(ContainerID containerId)
       throws InterruptedException, TimeoutException {
-    OzoneTestUtils.closeAllContainers(cluster.getStorageContainerManager().getEventQueue(),
+    OzoneTestUtils.closeAllContainers(
+        cluster.getStorageContainerManager().getEventQueue(),
         cluster.getStorageContainerManager());
 
     // Finalize Block should be cleared from container data.
-    GenericTestUtils.waitFor(() -> (
-        (KeyValueContainerData) getContainerfromDN(cluster.getHddsDatanodes().get(0),
-            containerId.getId()).getContainerData()).getFinalizedBlockSet().size() == 0,
-        100, 10 * 1000);
+    GenericTestUtils.waitFor(
+        () -> ((KeyValueContainerData) getContainerFromDN(
+            cluster.getHddsDatanodes().get(0),
+            containerId.getId()
+        ).getContainerData()).getFinalizedBlockSet().isEmpty(),
+        100,
+        10 * 1000);
     try {
       // Restart DataNode
       cluster.restartHddsDatanode(0, true);
@@ -239,27 +247,26 @@ public class TestFinalizeBlock {
     }
 
     // After DN restart also there should not be any finalizeBlock
-    assertTrue(((KeyValueContainerData)getContainerfromDN(
+    assertTrue(((KeyValueContainerData) getContainerFromDN(
         cluster.getHddsDatanodes().get(0),
-        containerId.getId()).getContainerData())
-        .getFinalizedBlockSet().size() == 0);
+        containerId.getId()).getContainerData()
+    ).getFinalizedBlockSet().isEmpty());
   }
 
   private void testRejectPutAndWriteChunkAfterFinalizeBlock(ContainerID containerId, Pipeline pipeline,
-      XceiverClientSpi xceiverClient, List<OmKeyLocationInfoGroup> omKeyLocationInfoGroupList)
-      throws IOException {
+      XceiverClientSpi xceiverClient, List<OmKeyLocationInfoGroup> omKeyLocationInfoGroupList) throws IOException {
     // Try doing WRITE chunk on the already finalized block
     ContainerProtos.ContainerCommandRequestProto request =
-        ContainerTestHelper.getWriteChunkRequest(pipeline,
-            (new BlockID(containerId.getId(), omKeyLocationInfoGroupList.get(0)
-                .getLocationList().get(0).getLocalID())), 100);
+        ContainerTestHelper.getWriteChunkRequest(
+            pipeline,
+            (new BlockID(containerId.getId(), omKeyLocationInfoGroupList.get(0).getLocationList().get(0).getLocalID())),
+            100);
 
     try {
       xceiverClient.sendCommand(request);
       fail("Write chunk should fail.");
     } catch (IOException e) {
-      assertTrue(e.getCause().getMessage()
-          .contains("Block already finalized"));
+      assertThat(e.getCause().getMessage()).contains("Block already finalized");
     }
 
     // Try doing PUT block on the already finalized block
@@ -268,8 +275,7 @@ public class TestFinalizeBlock {
       xceiverClient.sendCommand(request);
       fail("Put block should fail.");
     } catch (IOException e) {
-      assertTrue(e.getCause().getMessage()
-          .contains("Block already finalized"));
+      assertThat(e.getCause().getMessage()).contains("Block already finalized");
     }
   }
 
@@ -283,15 +289,12 @@ public class TestFinalizeBlock {
   }
 
   /**
-   * create a key with specified name.
-   * @param keyName
-   * @throws IOException
+   * Create a key with specified name.
    */
   private void createKey(String keyName) throws IOException {
-    OzoneOutputStream key = objectStore.getVolume(volumeName)
-        .getBucket(bucketName)
-        .createKey(keyName, 1024, ReplicationType.RATIS,
-            ReplicationFactor.ONE, new HashMap<>());
+    OzoneOutputStream key = objectStore.getVolume(VOLUME_NAME)
+        .getBucket(BUCKET_NAME)
+        .createKey(keyName, 1024, ReplicationType.RATIS, ReplicationFactor.ONE, new HashMap<>());
     key.write("test".getBytes(UTF_8));
     key.close();
   }
@@ -299,9 +302,10 @@ public class TestFinalizeBlock {
   /**
    * Return the container for the given containerID from the given DN.
    */
-  private Container getContainerfromDN(HddsDatanodeService hddsDatanodeService,
-      long containerID) {
-    return hddsDatanodeService.getDatanodeStateMachine().getContainer()
-        .getContainerSet().getContainer(containerID);
+  private Container getContainerFromDN(HddsDatanodeService hddsDatanodeService, long containerID) {
+    return hddsDatanodeService.getDatanodeStateMachine()
+        .getContainer()
+        .getContainerSet()
+        .getContainer(containerID);
   }
 }

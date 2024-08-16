@@ -135,9 +135,10 @@ public class DatanodeStoreWithIncrementalChunkList extends AbstractDatanodeStore
     return isFullChunk(data.getChunks().get(data.getChunks().size() - 1));
   }
 
+  @Override
   public void putBlockByID(BatchOperation batch, boolean incremental,
-      long localID, BlockData data, KeyValueContainerData containerData,
-      boolean endOfBlock) throws IOException {
+                           long localID, BlockData data, KeyValueContainerData containerData,
+                           boolean endOfBlock) throws IOException {
     if (!incremental || !isPartialChunkList(data)) {
       // Case (1) old client: override chunk list.
       getBlockDataTable().putWithBatch(

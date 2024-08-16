@@ -86,7 +86,7 @@ public enum ContainerLayoutTestInfo {
   FILE_PER_BLOCK {
     @Override
     public ChunkManager createChunkManager(boolean sync, BlockManager manager) {
-      return new FilePerBlockStrategy(sync, null, null);
+      return new FilePerBlockStrategy(sync, null);
     }
 
     @Override
@@ -100,11 +100,9 @@ public enum ContainerLayoutTestInfo {
     }
   };
 
-  public abstract ChunkManager createChunkManager(boolean sync,
-      BlockManager manager);
+  public abstract ChunkManager createChunkManager(boolean sync, BlockManager manager);
 
-  public abstract void validateFileCount(File dir, long blockCount,
-      long chunkCount);
+  public abstract void validateFileCount(File dir, long blockCount, long chunkCount);
 
   public abstract ContainerLayoutVersion getLayout();
 

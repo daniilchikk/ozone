@@ -83,8 +83,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * Test Containers.
  */
 public class TestContainerServer {
-  static final String TEST_DIR = GenericTestUtils.getTestDir("dfs")
-      .getAbsolutePath() + File.separator;
+  static final String TEST_DIR = GenericTestUtils.getTestDir("dfs").getAbsolutePath() + File.separator;
   private static final OzoneConfiguration CONF = new OzoneConfiguration();
   private static CertificateClient caClient;
   @TempDir
@@ -96,8 +95,7 @@ public class TestContainerServer {
     CONF.set(HddsConfigKeys.HDDS_METADATA_DIR_NAME, TEST_DIR);
     CONF.setBoolean(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATASTREAM_ENABLED, false);
     DatanodeDetails dn = MockDatanodeDetails.randomDatanodeDetails();
-    caClient = new DNCertificateClient(new SecurityConfig(CONF), null,
-        dn, null, null, null);
+    caClient = new DNCertificateClient(new SecurityConfig(CONF), null, dn, null, null, null);
   }
 
   @AfterAll
@@ -108,14 +106,13 @@ public class TestContainerServer {
   @Test
   public void testClientServer() throws Exception {
     DatanodeDetails datanodeDetails = randomDatanodeDetails();
-    runTestClientServer(1, (pipeline, conf) -> conf
+    runTestClientServer(1,
+        (pipeline, conf) -> conf
             .setInt(OzoneConfigKeys.HDDS_CONTAINER_IPC_PORT,
-                pipeline.getFirstNode()
-                    .getPort(DatanodeDetails.Port.Name.STANDALONE).getValue()),
+                pipeline.getFirstNode().getPort(DatanodeDetails.Port.Name.STANDALONE).getValue()),
         XceiverClientGrpc::new,
-        (dn, conf) -> new XceiverServerGrpc(datanodeDetails, conf,
-            new TestContainerDispatcher(), caClient), (dn, p) -> {
-        });
+        (dn, conf) -> new XceiverServerGrpc(datanodeDetails, conf, new TestContainerDispatcher(), caClient),
+        (dn, p) -> { });
   }
 
   @Test
@@ -124,21 +121,23 @@ public class TestContainerServer {
     runTestClientServerRatis(GRPC, 3);
   }
 
-  static XceiverServerRatis newXceiverServerRatis(
-      DatanodeDetails dn, OzoneConfiguration conf) throws IOException {
-    conf.setInt(OzoneConfigKeys.HDDS_CONTAINER_RATIS_IPC_PORT,
-        dn.getPort(DatanodeDetails.Port.Name.RATIS).getValue());
+  static XceiverServerRatis newXceiverServerRatis(DatanodeDetails dn, OzoneConfiguration conf) throws IOException {
+    conf.setInt(OzoneConfigKeys.HDDS_CONTAINER_RATIS_IPC_PORT, dn.getPort(DatanodeDetails.Port.Name.RATIS).getValue());
     final String dir = TEST_DIR + dn.getUuid();
     conf.set(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR, dir);
 
     final ContainerDispatcher dispatcher = new TestContainerDispatcher();
-    return XceiverServerRatis.newXceiverServerRatis(null, dn, conf, dispatcher,
+    return XceiverServerRatis.newXceiverServerRatis(
+        null,
+        dn,
+        conf,
+        dispatcher,
         new ContainerController(new ContainerSet(1000), Maps.newHashMap()),
-        caClient, null);
+        caClient,
+        null);
   }
 
-  static void runTestClientServerRatis(RpcType rpc, int numNodes)
-      throws Exception {
+  static void runTestClientServerRatis(RpcType rpc, int numNodes) throws Exception {
     runTestClientServer(numNodes,
         (pipeline, conf) -> RatisTestHelper.initRatisConf(rpc, conf),
         XceiverClientRatis::newXceiverClientRatis,
@@ -149,17 +148,14 @@ public class TestContainerServer {
   static void runTestClientServer(
       int numDatanodes,
       CheckedBiConsumer<Pipeline, OzoneConfiguration, IOException> initConf,
-      CheckedBiFunction<Pipeline, OzoneConfiguration, XceiverClientSpi,
-                IOException> createClient,
-      CheckedBiFunction<DatanodeDetails, OzoneConfiguration, XceiverServerSpi,
-          IOException> createServer,
-      CheckedBiConsumer<DatanodeDetails, Pipeline, IOException> initServer)
-      throws Exception {
+      CheckedBiFunction<Pipeline, OzoneConfiguration, XceiverClientSpi, IOException> createClient,
+      CheckedBiFunction<DatanodeDetails, OzoneConfiguration, XceiverServerSpi, IOException> createServer,
+      CheckedBiConsumer<DatanodeDetails, Pipeline, IOException> initServer) throws Exception {
+
     final List<XceiverServerSpi> servers = new ArrayList<>();
     XceiverClientSpi client = null;
     try {
-      final Pipeline pipeline =
-          MockPipeline.createPipeline(numDatanodes);
+      final Pipeline pipeline = MockPipeline.createPipeline(numDatanodes);
       initConf.accept(pipeline, CONF);
 
       for (DatanodeDetails dn : pipeline.getNodes()) {
@@ -173,9 +169,7 @@ public class TestContainerServer {
       client.connect();
 
       final ContainerCommandRequestProto request =
-          ContainerTestHelper
-              .getCreateContainerRequest(
-                  ContainerTestHelper.getTestContainerID(), pipeline);
+          ContainerTestHelper.getCreateContainerRequest(ContainerTestHelper.getTestContainerID(), pipeline);
       assertNotNull(request.getTraceID());
 
       client.sendCommand(request);
@@ -187,32 +181,32 @@ public class TestContainerServer {
     }
   }
 
-  private HddsDispatcher createDispatcher(DatanodeDetails dd, UUID scmId,
-                                                 OzoneConfiguration conf)
-      throws IOException {
+  private HddsDispatcher createDispatcher(DatanodeDetails dd, UUID scmId, OzoneConfiguration conf) throws IOException {
     ContainerSet containerSet = new ContainerSet(1000);
     conf.set(HDDS_DATANODE_DIR_KEY,
-        Paths.get(TEST_DIR, "dfs", "data", "hdds",
-            RandomStringUtils.randomAlphabetic(4)).toString());
+        Paths.get(TEST_DIR, "dfs", "data", "hdds", RandomStringUtils.randomAlphabetic(4)).toString());
     conf.set(OZONE_METADATA_DIRS, TEST_DIR);
-    VolumeSet volumeSet = new MutableVolumeSet(dd.getUuidString(), conf, null,
-        StorageVolume.VolumeType.DATA_VOLUME, null);
+    VolumeSet volumeSet = new MutableVolumeSet(
+        dd.getUuidString(), conf,
+        null,
+        StorageVolume.VolumeType.DATA_VOLUME,
+        null);
     StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList())
         .forEach(hddsVolume -> hddsVolume.setDbParentDir(tempDir.toFile()));
     StateContext context = ContainerTestUtils.getMockContext(dd, conf);
     ContainerMetrics metrics = ContainerMetrics.create(conf);
     Map<ContainerProtos.ContainerType, Handler> handlers = Maps.newHashMap();
-    for (ContainerProtos.ContainerType containerType :
-        ContainerProtos.ContainerType.values()) {
+    for (ContainerProtos.ContainerType containerType : ContainerProtos.ContainerType.values()) {
       handlers.put(containerType,
-          Handler.getHandlerForContainerType(containerType, conf,
+          Handler.getHandlerForContainerType(containerType,
+              conf,
               dd.getUuid().toString(),
-              containerSet, volumeSet, metrics,
-              c -> {
-              }));
+              containerSet,
+              volumeSet,
+              metrics,
+              c -> { }));
     }
-    HddsDispatcher hddsDispatcher = new HddsDispatcher(
-        conf, containerSet, volumeSet, handlers, context, metrics, null);
+    HddsDispatcher hddsDispatcher = new HddsDispatcher(conf, containerSet, handlers, context, metrics, null);
     hddsDispatcher.setClusterId(scmId.toString());
     return hddsDispatcher;
   }
@@ -220,9 +214,10 @@ public class TestContainerServer {
   @Test
   public void testClientServerWithContainerDispatcher() throws Exception {
     DatanodeDetails dd = MockDatanodeDetails.randomDatanodeDetails();
-    HddsDispatcher hddsDispatcher = createDispatcher(dd,
-        UUID.randomUUID(), CONF);
-    runTestClientServer(1, (pipeline, conf) -> conf
+    HddsDispatcher hddsDispatcher = createDispatcher(dd, UUID.randomUUID(), CONF);
+    runTestClientServer(
+        1,
+        (pipeline, conf) -> conf
             .setInt(OzoneConfigKeys.HDDS_CONTAINER_IPC_PORT,
                 pipeline.getFirstNode()
                     .getPort(DatanodeDetails.Port.Name.STANDALONE).getValue()),
@@ -240,9 +235,7 @@ public class TestContainerServer {
      * @return Command Response
      */
     @Override
-    public ContainerCommandResponseProto dispatch(
-        ContainerCommandRequestProto msg,
-        DispatcherContext context) {
+    public ContainerCommandResponseProto dispatch(ContainerCommandRequestProto msg, DispatcherContext context) {
       return ContainerTestHelper.getCreateContainerResponse(msg);
     }
 
@@ -258,6 +251,7 @@ public class TestContainerServer {
     @Override
     public void shutdown() {
     }
+
     @Override
     public Handler getHandler(ContainerProtos.ContainerType containerType) {
       return null;

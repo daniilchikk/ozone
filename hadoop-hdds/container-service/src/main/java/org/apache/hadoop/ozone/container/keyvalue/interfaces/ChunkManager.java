@@ -35,35 +35,41 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /**
- * Chunk Manager allows read, write, delete and listing of chunks in
- * a container.
+ * Chunk Manager allows read, write, delete and listing of chunks in a container.
  */
-
 public interface ChunkManager {
 
   /**
-   * writes a given chunk.
+   * Writes a chunk of data to the specified container and block.
    *
-   * @param container - Container for the chunk
-   * @param blockID - ID of the block.
-   * @param info - ChunkInfo.
-   * @param data
-   * @param dispatcherContext - dispatcher context info.
-   * @throws StorageContainerException
+   * @param container The container to which the chunk is written.
+   * @param blockID The ID of the block within the container.
+   * @param info Metadata about the chunk being written.
+   * @param data Buffer containing the chunk data to be written.
+   * @param dispatcherContext Context information for the dispatcher performing the write operation.
+   * @throws StorageContainerException If an error occurs during the write operation.
    */
-  void writeChunk(Container container, BlockID blockID, ChunkInfo info,
-      ChunkBuffer data, DispatcherContext dispatcherContext)
-      throws StorageContainerException;
+  void writeChunk(Container container, BlockID blockID, ChunkInfo info, ChunkBuffer data,
+      DispatcherContext dispatcherContext) throws StorageContainerException;
 
-  default void writeChunk(Container container, BlockID blockID, ChunkInfo info,
-      ByteBuffer data, DispatcherContext dispatcherContext)
-      throws StorageContainerException {
+  /**
+   * Writes a chunk of data to the specified container and block.
+   *
+   * @param container The container to which the chunk is written.
+   * @param blockID The ID of the block within the container.
+   * @param info Metadata about the chunk being written.
+   * @param data ByteBuffer containing the chunk data to be written.
+   * @param dispatcherContext Context information for the dispatcher performing the write operation.
+   * @throws StorageContainerException If an error occurs during the write operation.
+   */
+  default void writeChunk(Container container, BlockID blockID, ChunkInfo info, ByteBuffer data,
+      DispatcherContext dispatcherContext) throws StorageContainerException {
     ChunkBuffer wrapper = ChunkBuffer.wrap(data);
     writeChunk(container, blockID, info, wrapper, dispatcherContext);
   }
 
   /**
-   * reads the data defined by a chunk.
+   * Reads the data defined by a chunk.
    *
    * @param container - Container for the chunk
    * @param blockID - ID of the block.
@@ -75,8 +81,8 @@ public interface ChunkManager {
    * TODO: Right now we do not support partial reads and writes of chunks.
    * TODO: Explore if we need to do that for ozone.
    */
-  ChunkBuffer readChunk(Container container, BlockID blockID, ChunkInfo info,
-      DispatcherContext dispatcherContext) throws StorageContainerException;
+  ChunkBuffer readChunk(Container container, BlockID blockID, ChunkInfo info, DispatcherContext dispatcherContext)
+      throws StorageContainerException;
 
   /**
    * Deletes a given chunk.
@@ -84,13 +90,17 @@ public interface ChunkManager {
    * @param container - Container for the chunk
    * @param blockID - ID of the block.
    * @param info  - Chunk Info
-   * @throws StorageContainerException
    */
-  void deleteChunk(Container container, BlockID blockID, ChunkInfo info) throws
-      StorageContainerException;
+  void deleteChunk(Container container, BlockID blockID, ChunkInfo info) throws StorageContainerException;
 
-  void deleteChunks(Container container, BlockData blockData) throws
-      StorageContainerException;
+  /**
+   * Deletes the chunks associated with the given block data in the specified container.
+   *
+   * @param container The container from which the chunks will be deleted.
+   * @param blockData The block data containing information about the chunks to be deleted.
+   * @throws StorageContainerException If an error occurs during the deletion process.
+   */
+  void deleteChunks(Container container, BlockData blockData) throws StorageContainerException;
 
   // TODO : Support list operations.
 
@@ -101,42 +111,74 @@ public interface ChunkManager {
     // if applicable
   }
 
-  default void finishWriteChunks(KeyValueContainer kvContainer,
-      BlockData blockData) throws IOException {
+  /**
+   * Finalizes the process of writing chunks to the specified container and block data.
+   *
+   * @param kvContainer The container to which the chunks are being written.
+   * @param blockData The block data associated with the chunks being written.
+   * @throws IOException If an I/O error occurs during the finalization process.
+   */
+  default void finishWriteChunks(KeyValueContainer kvContainer, BlockData blockData) throws IOException {
     // no-op
   }
 
-  default void finalizeWriteChunk(KeyValueContainer container,
-      BlockID blockId) throws IOException {
+  /**
+   * Finalizes the process of writing a chunk to the specified container and block.
+   *
+   * @param container The container where the chunk is written.
+   * @param blockId The ID of the block within the container.
+   * @throws IOException If an I/O error occurs during the finalization process.
+   */
+  default void finalizeWriteChunk(KeyValueContainer container, BlockID blockId) throws IOException {
     // no-op
   }
 
-  default String streamInit(Container container, BlockID blockID)
+  /**
+   * Initializes a data stream for the specified container and block.
+   *
+   * @param container The container where the stream will be initialized.
+   * @param blockID The ID of the block within the container.
+   * @return A string that represents the status or identifier of the initialized stream.
+   * @throws StorageContainerException If an error occurs during the stream initialization.
+   */
+  default String streamInit(Container container, BlockID blockID) throws StorageContainerException {
+    return null;
+  }
+
+  /**
+   * Retrieves the data channel for streaming data within a specified container and block.
+   *
+   * @param container The container where the data stream exists.
+   * @param blockID The ID of the block within the container.
+   * @param metrics Metrics pertaining to the container.
+   * @return The DataChannel object associated with the specified container and block.
+   * @throws StorageContainerException If an error occurs during the execution of the method.
+   */
+  default StateMachine.DataChannel getStreamDataChannel(Container container, BlockID blockID, ContainerMetrics metrics)
       throws StorageContainerException {
     return null;
   }
 
-  default StateMachine.DataChannel getStreamDataChannel(
-          Container container, BlockID blockID, ContainerMetrics metrics)
-          throws StorageContainerException {
-    return null;
-  }
-
-  static int getBufferCapacityForChunkRead(ChunkInfo chunkInfo,
-      int defaultReadBufferCapacity) {
+  /**
+   * Determines the appropriate buffer capacity for reading a chunk based on provided chunk information
+   * and a default buffer capacity.
+   *
+   * @param chunkInfo The metadata information about the chunk to be read.
+   * @param defaultReadBufferCapacity The default buffer capacity to be used if no specific capacity is determined.
+   * @return The calculated buffer capacity for reading the chunk.
+   */
+  static int getBufferCapacityForChunkRead(ChunkInfo chunkInfo, int defaultReadBufferCapacity) {
     long bufferCapacity = 0;
     if (chunkInfo.isReadDataIntoSingleBuffer()) {
       // Older client - read all chunk data into one single buffer.
       bufferCapacity = chunkInfo.getLen();
     } else {
-      // Set buffer capacity to checksum boundary size so that each buffer
-      // corresponds to one checksum. If checksum is NONE, then set buffer
-      // capacity to default (OZONE_CHUNK_READ_BUFFER_DEFAULT_SIZE_KEY = 1MB).
+      // Set buffer capacity to checksum boundary size so that each buffer corresponds to one checksum.
+      // If checksum is NONE, then set buffer capacity to default (OZONE_CHUNK_READ_BUFFER_DEFAULT_SIZE_KEY = 1MB).
       ChecksumData checksumData = chunkInfo.getChecksumData();
 
       if (checksumData != null) {
-        if (checksumData.getChecksumType() ==
-            ContainerProtos.ChecksumType.NONE) {
+        if (checksumData.getChecksumType() == ContainerProtos.ChecksumType.NONE) {
           bufferCapacity = defaultReadBufferCapacity;
         } else {
           bufferCapacity = checksumData.getBytesPerChecksum();

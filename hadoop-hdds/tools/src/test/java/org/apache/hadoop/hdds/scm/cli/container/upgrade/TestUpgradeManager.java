@@ -105,19 +105,22 @@ public class TestUpgradeManager {
     final File metadataPath = new File(testRoot, "metadata");
     assertTrue(metadataPath.mkdirs());
 
-    CONF.set(HDDS_DATANODE_DIR_KEY,
-        volume1Path.getAbsolutePath() + "," + volume2Path.getAbsolutePath());
+    CONF.set(HDDS_DATANODE_DIR_KEY, volume1Path.getAbsolutePath() + "," + volume2Path.getAbsolutePath());
     CONF.set(OZONE_METADATA_DIRS, metadataPath.getAbsolutePath());
     datanodeId = UUID.randomUUID();
-    volumeSet = new MutableVolumeSet(datanodeId.toString(), SCM_ID, CONF,
-        null, StorageVolume.VolumeType.DATA_VOLUME, null);
+    volumeSet = new MutableVolumeSet(
+        datanodeId.toString(),
+        SCM_ID,
+        CONF,
+        null,
+        StorageVolume.VolumeType.DATA_VOLUME,
+        null);
 
     // create rocksdb instance in volume dir
     final List<HddsVolume> volumes = new ArrayList<>();
     for (StorageVolume storageVolume : volumeSet.getVolumesList()) {
       HddsVolume hddsVolume = (HddsVolume) storageVolume;
-      StorageVolumeUtil.checkVolume(hddsVolume, SCM_ID, SCM_ID, CONF, null,
-          null);
+      StorageVolumeUtil.checkVolume(hddsVolume, SCM_ID, SCM_ID, CONF, null, null);
       volumes.add(hddsVolume);
     }
 
@@ -136,7 +139,7 @@ public class TestUpgradeManager {
     containerSet = new ContainerSet(1000);
 
     blockManager = new BlockManagerImpl(CONF);
-    chunkManager = new FilePerBlockStrategy(true, blockManager, null);
+    chunkManager = new FilePerBlockStrategy(true, blockManager);
   }
 
   @BeforeAll
@@ -153,31 +156,27 @@ public class TestUpgradeManager {
   public void testUpgrade() throws IOException {
     int num = 2;
 
-    final Map<KeyValueContainerData, Map<String, BlockData>>
-        keyValueContainerBlockDataMap = genSchemaV2Containers(num);
+    final Map<KeyValueContainerData, Map<String, BlockData>> keyValueContainerBlockDataMap = genSchemaV2Containers(num);
     assertEquals(num, keyValueContainerBlockDataMap.size());
 
     shutdownAllVolume();
 
     final UpgradeManager upgradeManager = new UpgradeManager();
     final List<UpgradeManager.Result> results =
-        upgradeManager.run(CONF,
-            StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList()));
+        upgradeManager.run(CONF, StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList()));
 
     checkV3MetaData(keyValueContainerBlockDataMap, results, upgradeManager);
   }
 
-  private Map<String, BlockData> putAnyBlockData(KeyValueContainerData data,
-                                                 KeyValueContainer container,
-                                                 int numBlocks) {
+  private Map<String, BlockData> putAnyBlockData(KeyValueContainerData data, KeyValueContainer container,
+      int numBlocks) {
     // v3 key ==> block data
     final Map<String, BlockData> containerBlockDataMap = new HashMap<>();
 
     int txnID = 0;
     for (int i = 0; i < numBlocks; i++) {
       txnID = txnID + 1;
-      BlockID blockID =
-          ContainerTestHelper.getTestBlockID(data.getContainerID());
+      BlockID blockID = ContainerTestHelper.getTestBlockID(data.getContainerID());
       BlockData kd = new BlockData(blockID);
       List<ContainerProtos.ChunkInfo> chunks = Lists.newArrayList();
       putChunksInBlock(1, i, chunks, container, blockID);
@@ -185,27 +184,25 @@ public class TestUpgradeManager {
 
       try {
         final String localIDKey = Long.toString(blockID.getLocalID());
-        final String blockKey = DatanodeSchemaThreeDBDefinition
-            .getContainerKeyPrefix(data.getContainerID()) + localIDKey;
+        final String blockKey =
+            DatanodeSchemaThreeDBDefinition.getContainerKeyPrefix(data.getContainerID()) + localIDKey;
         blockManager.putBlock(container, kd);
         containerBlockDataMap.put(blockKey, kd);
       } catch (IOException exception) {
-        LOG.warn("Failed to put block: " + blockID.getLocalID()
-            + " in BlockDataTable.", exception);
+        LOG.warn("Failed to put block: {} in BlockDataTable.", blockID.getLocalID(), exception);
       }
     }
 
     return containerBlockDataMap;
   }
 
-  private void putChunksInBlock(int numOfChunksPerBlock, int i,
-                                List<ContainerProtos.ChunkInfo> chunks,
-                                KeyValueContainer container, BlockID blockID) {
+  private void putChunksInBlock(int numOfChunksPerBlock, int i, List<ContainerProtos.ChunkInfo> chunks,
+      KeyValueContainer container, BlockID blockID) {
     final long chunkLength = 100;
     try {
       for (int k = 0; k < numOfChunksPerBlock; k++) {
-        final String chunkName = String.format("%d_chunk_%d_block_%d",
-            blockID.getContainerBlockID().getLocalID(), k, i);
+        final String chunkName =
+            String.format("%d_chunk_%d_block_%d", blockID.getContainerBlockID().getLocalID(), k, i);
         final long offset = k * chunkLength;
         ContainerProtos.ChunkInfo info =
             ContainerProtos.ChunkInfo.newBuilder().setChunkName(chunkName)
@@ -219,26 +216,26 @@ public class TestUpgradeManager {
         }
       }
     } catch (IOException ex) {
-      LOG.warn("Putting chunks in blocks was not successful for BlockID: "
-          + blockID);
+      LOG.warn("Putting chunks in blocks was not successful for BlockID: {}", blockID);
     }
   }
 
-  private Map<KeyValueContainerData, Map<String, BlockData>>
-      genSchemaV2Containers(int numContainers) throws IOException {
+  private Map<KeyValueContainerData, Map<String, BlockData>> genSchemaV2Containers(int numContainers)
+      throws IOException {
     CONF.setBoolean(DatanodeConfiguration.CONTAINER_SCHEMA_V3_ENABLED, false);
 
     // container id ==> blocks
-    final Map<KeyValueContainerData, Map<String, BlockData>> checkBlockDataMap =
-        new HashMap<>();
+    final Map<KeyValueContainerData, Map<String, BlockData>> checkBlockDataMap = new HashMap<>();
 
     // create container
     for (int i = 0; i < numContainers; i++) {
       long containerId = ContainerTestHelper.getTestContainerID();
 
-      KeyValueContainerData data = new KeyValueContainerData(containerId,
+      KeyValueContainerData data = new KeyValueContainerData(
+          containerId,
           ContainerLayoutVersion.FILE_PER_BLOCK,
-          ContainerTestHelper.CONTAINER_MAX_SIZE, UUID.randomUUID().toString(),
+          ContainerTestHelper.CONTAINER_MAX_SIZE,
+          UUID.randomUUID().toString(),
           datanodeId.toString());
       data.setSchemaVersion(OzoneConsts.SCHEMA_V2);
 
@@ -246,12 +243,10 @@ public class TestUpgradeManager {
       container.create(volumeSet, volumeChoosingPolicy, SCM_ID);
 
       containerSet.addContainer(container);
-      data = (KeyValueContainerData) containerSet.getContainer(containerId)
-          .getContainerData();
+      data = (KeyValueContainerData) containerSet.getContainer(containerId).getContainerData();
       data.setSchemaVersion(OzoneConsts.SCHEMA_V2);
 
-      final Map<String, BlockData> blockDataMap =
-          putAnyBlockData(data, container, 10);
+      final Map<String, BlockData> blockDataMap = putAnyBlockData(data, container, 10);
 
       data.closeContainer();
       container.close();
@@ -267,32 +262,26 @@ public class TestUpgradeManager {
     }
   }
 
-  private void checkV3MetaData(Map<KeyValueContainerData,
-      Map<String, BlockData>> blockDataMap, List<UpgradeManager.Result> results,
-      UpgradeManager upgradeManager) throws IOException {
+  private void checkV3MetaData(Map<KeyValueContainerData, Map<String, BlockData>> blockDataMap,
+      List<UpgradeManager.Result> results, UpgradeManager upgradeManager) throws IOException {
     Map<Long, UpgradeTask.UpgradeContainerResult> resultMap = new HashMap<>();
 
     for (UpgradeManager.Result result : results) {
       resultMap.putAll(result.getResultMap());
     }
 
-    for (Map.Entry<KeyValueContainerData, Map<String, BlockData>> entry :
-        blockDataMap.entrySet()) {
+    for (Map.Entry<KeyValueContainerData, Map<String, BlockData>> entry : blockDataMap.entrySet()) {
       final KeyValueContainerData containerData = entry.getKey();
       final Map<String, BlockData> blockKeyValue = entry.getValue();
 
-      final UpgradeTask.UpgradeContainerResult result =
-          resultMap.get(containerData.getContainerID());
-      final KeyValueContainerData v3ContainerData =
-          (KeyValueContainerData) result.getNewContainerData();
+      final UpgradeTask.UpgradeContainerResult result = resultMap.get(containerData.getContainerID());
+      final KeyValueContainerData v3ContainerData = (KeyValueContainerData) result.getNewContainerData();
 
       final DatanodeStoreSchemaThreeImpl datanodeStoreSchemaThree =
           upgradeManager.getDBStore(v3ContainerData.getVolume());
-      final Table<String, BlockData> blockDataTable =
-          datanodeStoreSchemaThree.getBlockDataTable();
+      final Table<String, BlockData> blockDataTable = datanodeStoreSchemaThree.getBlockDataTable();
 
-      for (Map.Entry<String, BlockData> blockDataEntry : blockKeyValue
-          .entrySet()) {
+      for (Map.Entry<String, BlockData> blockDataEntry : blockKeyValue.entrySet()) {
         final String v3key = blockDataEntry.getKey();
         final BlockData blockData = blockDataTable.get(v3key);
         final BlockData originBlockData = blockDataEntry.getValue();

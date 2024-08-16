@@ -25,8 +25,7 @@ import org.apache.hadoop.ozone.container.common.helpers.BlockData;
 import java.io.File;
 
 /**
- * This class serves as an intermediate format for all possible database
- * layouts for datanodes.
+ * This class serves as an intermediate format for all possible database layouts for datanodes.
  */
 public abstract class AbstractDatanodeDBDefinition implements DBDefinition {
 
@@ -38,8 +37,7 @@ public abstract class AbstractDatanodeDBDefinition implements DBDefinition {
    * @param config The ozone global configuration.
    * {@link DBDefinition}.
    */
-  protected AbstractDatanodeDBDefinition(String dbPath,
-      ConfigurationSource config) {
+  protected AbstractDatanodeDBDefinition(String dbPath, ConfigurationSource config) {
     this.dbDir = new File(dbPath);
     this.config = config;
   }
@@ -56,24 +54,20 @@ public abstract class AbstractDatanodeDBDefinition implements DBDefinition {
 
   @Override
   public String getLocationConfigKey() {
-    throw new UnsupportedOperationException(
-            "No location config key available for datanode databases.");
+    throw new UnsupportedOperationException("No location config key available for datanode databases.");
   }
 
   public ConfigurationSource getConfig() {
     return config;
   }
 
-  public abstract DBColumnFamilyDefinition<String, BlockData>
-      getBlockDataColumnFamily();
+  public abstract DBColumnFamilyDefinition<String, BlockData> getBlockDataColumnFamily();
 
-  public abstract DBColumnFamilyDefinition<String, Long>
-      getMetadataColumnFamily();
+  public abstract DBColumnFamilyDefinition<String, Long> getMetadataColumnFamily();
 
   public DBColumnFamilyDefinition<String, Long> getFinalizeBlocksColumnFamily() {
     return null;
   }
 
-  public abstract DBColumnFamilyDefinition<String, BlockData>
-      getLastChunkInfoColumnFamily();
+  public abstract DBColumnFamilyDefinition<String, BlockData> getLastChunkInfoColumnFamily();
 }

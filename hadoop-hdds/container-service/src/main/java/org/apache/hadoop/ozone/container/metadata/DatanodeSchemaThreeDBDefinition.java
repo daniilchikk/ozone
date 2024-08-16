@@ -36,55 +36,54 @@ import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_DB_PROFILE;
 import static org.apache.hadoop.hdds.utils.db.DBStoreBuilder.HDDS_DEFAULT_DB_PROFILE;
 
 /**
- * This class defines the RocksDB structure for datanode following schema
- * version 3, where the block data, metadata, and transactions which are to be
- * deleted are put in their own separate column families and with containerID
- * as key prefix.
+ * This class defines the RocksDB structure for datanode following schema version 3,
+ * where the block data, metadata,
+ * and transactions which are to be deleted are put in their own separate column families
+ * and with containerID as key prefix.
  * <p>
  * Some key format illustrations for the column families:
- * - block_data:     containerID | blockID
- * - metadata:       containerID | #BLOCKCOUNT
- *                   containerID | #BYTESUSED
- *                   ...
- * - deleted_blocks: containerID | blockID
- * - delete_txns:    containerID | TransactionID
- * <p>
- * The keys would be encoded in a fix-length encoding style in order to
- * utilize the "Prefix Seek" feature from Rocksdb to optimize seek.
+ * <ul>
+ * <li>block_data:<br/>
+ * containerID | blockID
+ * <li>metadata:<br/>
+ * containerID | #BLOCKCOUNT<br/>
+ * containerID | #BYTESUSED<br/>
+ * ...
+ * <li>deleted_blocks:<br/>
+ * containerID | blockID
+ * <li>delete_txns:<br/>
+ * containerID | TransactionID
+ * </ul>
+ * The keys would be encoded in a fix-length encoding style to use the "Prefix Seek"
+ * feature from Rocksdb to optimize seek.
  */
-public class DatanodeSchemaThreeDBDefinition
-    extends AbstractDatanodeDBDefinition
+public class DatanodeSchemaThreeDBDefinition extends AbstractDatanodeDBDefinition
     implements DBDefinition.WithMapInterface {
-  public static final DBColumnFamilyDefinition<String, BlockData>
-      BLOCK_DATA =
+  public static final DBColumnFamilyDefinition<String, BlockData> BLOCK_DATA =
       new DBColumnFamilyDefinition<>(
           "block_data",
           FixedLengthStringCodec.get(),
           BlockData.getCodec());
 
-  public static final DBColumnFamilyDefinition<String, Long>
-      METADATA =
+  public static final DBColumnFamilyDefinition<String, Long> METADATA =
       new DBColumnFamilyDefinition<>(
           "metadata",
           FixedLengthStringCodec.get(),
           LongCodec.get());
 
-  public static final DBColumnFamilyDefinition<String, DeletedBlocksTransaction>
-      DELETE_TRANSACTION =
+  public static final DBColumnFamilyDefinition<String, DeletedBlocksTransaction> DELETE_TRANSACTION =
       new DBColumnFamilyDefinition<>(
           "delete_txns",
           FixedLengthStringCodec.get(),
           Proto2Codec.get(DeletedBlocksTransaction.getDefaultInstance()));
 
-  public static final DBColumnFamilyDefinition<String, Long>
-      FINALIZE_BLOCKS =
+  public static final DBColumnFamilyDefinition<String, Long> FINALIZE_BLOCKS =
       new DBColumnFamilyDefinition<>(
           "finalize_blocks",
           FixedLengthStringCodec.get(),
           LongCodec.get());
 
-  public static final DBColumnFamilyDefinition<String, BlockData>
-      LAST_CHUNK_INFO =
+  public static final DBColumnFamilyDefinition<String, BlockData> LAST_CHUNK_INFO =
       new DBColumnFamilyDefinition<>(
           "last_chunk_info",
           FixedLengthStringCodec.get(),
@@ -92,27 +91,25 @@ public class DatanodeSchemaThreeDBDefinition
 
   private static String separator = "";
 
-  private static final Map<String, DBColumnFamilyDefinition<?, ?>>
-      COLUMN_FAMILIES = DBColumnFamilyDefinition.newUnmodifiableMap(
+  private static final Map<String, DBColumnFamilyDefinition<?, ?>> COLUMN_FAMILIES =
+      DBColumnFamilyDefinition.newUnmodifiableMap(
          BLOCK_DATA,
          METADATA,
          DELETE_TRANSACTION,
          FINALIZE_BLOCKS,
          LAST_CHUNK_INFO);
 
-  public DatanodeSchemaThreeDBDefinition(String dbPath,
-      ConfigurationSource config) {
+  public DatanodeSchemaThreeDBDefinition(String dbPath, ConfigurationSource config) {
     super(dbPath, config);
 
     DatanodeConfiguration dc = config.getObject(DatanodeConfiguration.class);
     setSeparator(dc.getContainerSchemaV3KeySeparator());
 
     // Get global ColumnFamilyOptions first.
-    DatanodeDBProfile dbProfile = DatanodeDBProfile
-        .getProfile(config.getEnum(HDDS_DB_PROFILE, HDDS_DEFAULT_DB_PROFILE));
+    DatanodeDBProfile dbProfile =
+        DatanodeDBProfile.getProfile(config.getEnum(HDDS_DB_PROFILE, HDDS_DEFAULT_DB_PROFILE));
 
-    ManagedColumnFamilyOptions cfOptions =
-        dbProfile.getColumnFamilyOptions(config);
+    ManagedColumnFamilyOptions cfOptions = dbProfile.getColumnFamilyOptions(config);
     // Use prefix seek to mitigating seek overhead.
     // See: https://github.com/facebook/rocksdb/wiki/Prefix-Seek
     cfOptions.useFixedLengthPrefixExtractor(getContainerKeyPrefixLength());
@@ -130,8 +127,7 @@ public class DatanodeSchemaThreeDBDefinition
   }
 
   @Override
-  public DBColumnFamilyDefinition<String, BlockData>
-      getBlockDataColumnFamily() {
+  public DBColumnFamilyDefinition<String, BlockData> getBlockDataColumnFamily() {
     return BLOCK_DATA;
   }
 
@@ -141,46 +137,70 @@ public class DatanodeSchemaThreeDBDefinition
   }
 
   @Override
-  public DBColumnFamilyDefinition<String, BlockData>
-      getLastChunkInfoColumnFamily() {
+  public DBColumnFamilyDefinition<String, BlockData> getLastChunkInfoColumnFamily() {
     return LAST_CHUNK_INFO;
   }
 
-  public DBColumnFamilyDefinition<String, DeletedBlocksTransaction>
-      getDeleteTransactionsColumnFamily() {
+  /**
+   * Retrieves the column family definition for delete transactions.
+   *
+   * @return A DBColumnFamilyDefinition holding the configuration for delete transactions.
+   */
+  public DBColumnFamilyDefinition<String, DeletedBlocksTransaction> getDeleteTransactionsColumnFamily() {
     return DELETE_TRANSACTION;
   }
 
   @Override
-  public DBColumnFamilyDefinition<String, Long>
-      getFinalizeBlocksColumnFamily() {
+  public DBColumnFamilyDefinition<String, Long> getFinalizeBlocksColumnFamily() {
     return FINALIZE_BLOCKS;
   }
 
+  /**
+   * Gets the length of the container key prefix in bytes.
+   *
+   * @return the length of the container key prefix as an integer.
+   */
   public static int getContainerKeyPrefixLength() {
-    return FixedLengthStringCodec.string2Bytes(
-        getContainerKeyPrefix(0L)).length;
+    return FixedLengthStringCodec.string2Bytes(getContainerKeyPrefix(0L)).length;
   }
 
+  /**
+   * Generates a prefix key for a given container ID.
+   *
+   * @param containerID the identifier of the container for which the prefix key is generated
+   * @return the generated prefix key as a String
+   */
   public static String getContainerKeyPrefix(long containerID) {
     // NOTE: Rocksdb normally needs a fixed length prefix.
-    return FixedLengthStringCodec.bytes2String(Longs.toByteArray(containerID))
-        + separator;
+    return FixedLengthStringCodec.bytes2String(Longs.toByteArray(containerID)) + separator;
   }
 
+  /**
+   * Converts the container key prefix, generated based on the container ID, to a byte array representation.
+   *
+   * @param containerID The identifier of the container for which the key prefix bytes are generated.
+   * @return A byte array representing the container key prefix.
+   */
   public static byte[] getContainerKeyPrefixBytes(long containerID) {
     // NOTE: Rocksdb normally needs a fixed length prefix.
-    return FixedLengthStringCodec.string2Bytes(
-        getContainerKeyPrefix(containerID));
+    return FixedLengthStringCodec.string2Bytes(getContainerKeyPrefix(containerID));
   }
 
+  /**
+   * Extracts the key from a prefixed key by removing the prefix.
+   *
+   * @param keyWithPrefix the key that contains the prefix to be removed
+   * @return the key without the prefix
+   */
   public static String getKeyWithoutPrefix(String keyWithPrefix) {
     return keyWithPrefix.substring(keyWithPrefix.indexOf(separator) + 1);
   }
+
   /**
+   * Retrieves the container ID from a given key.
    *
-   * @param key rocksDB original key
-   * @return containerID
+   * @param key the input key from which the container ID is to be extracted
+   * @return the container ID as a long value
    */
   public static long getContainerId(String key) {
     int index = getContainerKeyPrefixLength();

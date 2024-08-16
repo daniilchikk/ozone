@@ -60,12 +60,10 @@ public class TestHandler {
     this.containerSet = mock(ContainerSet.class);
     this.volumeSet = mock(MutableVolumeSet.class);
     DatanodeDetails datanodeDetails = mock(DatanodeDetails.class);
-    StateContext context = ContainerTestUtils.getMockContext(
-        datanodeDetails, conf);
+    StateContext context = ContainerTestUtils.getMockContext(datanodeDetails, conf);
     ContainerMetrics metrics = ContainerMetrics.create(conf);
     Map<ContainerProtos.ContainerType, Handler> handlers = Maps.newHashMap();
-    for (ContainerProtos.ContainerType containerType :
-        ContainerProtos.ContainerType.values()) {
+    for (ContainerProtos.ContainerType containerType : ContainerProtos.ContainerType.values()) {
       handlers.put(containerType,
           Handler.getHandlerForContainerType(
               containerType, conf,
@@ -73,8 +71,7 @@ public class TestHandler {
               containerSet, volumeSet, metrics,
               TestHddsDispatcher.NO_OP_ICR_SENDER));
     }
-    this.dispatcher = new HddsDispatcher(
-        conf, containerSet, volumeSet, handlers, null, metrics, null);
+    this.dispatcher = new HddsDispatcher(conf, containerSet, handlers, null, metrics, null);
   }
 
   @AfterEach
@@ -84,25 +81,19 @@ public class TestHandler {
 
   @Test
   public void testGetKeyValueHandler() throws Exception {
-    Handler kvHandler = dispatcher.getHandler(
-        ContainerProtos.ContainerType.KeyValueContainer);
+    Handler kvHandler = dispatcher.getHandler(ContainerProtos.ContainerType.KeyValueContainer);
 
-    assertInstanceOf(KeyValueHandler.class, kvHandler,
-        "getHandlerForContainerType returned incorrect handler");
+    assertInstanceOf(KeyValueHandler.class, kvHandler, "getHandlerForContainerType returned incorrect handler");
   }
 
   @Test
   public void testGetHandlerForInvalidContainerType() {
-    // When new ContainerProtos.ContainerType are added, increment the code
-    // for invalid enum.
-    ContainerProtos.ContainerType invalidContainerType =
-        ContainerProtos.ContainerType.forNumber(2);
+    // When new ContainerProtos.ContainerType are added, increment the code for invalid enum.
+    ContainerProtos.ContainerType invalidContainerType = ContainerProtos.ContainerType.forNumber(2);
 
-    assertNull(invalidContainerType,
-        "New ContainerType detected. Not an invalid containerType");
+    assertNull(invalidContainerType, "New ContainerType detected. Not an invalid containerType");
 
     Handler dispatcherHandler = dispatcher.getHandler(invalidContainerType);
-    assertNull(dispatcherHandler,
-        "Get Handler for Invalid ContainerType should return null.");
+    assertNull(dispatcherHandler, "Get Handler for Invalid ContainerType should return null.");
   }
 }

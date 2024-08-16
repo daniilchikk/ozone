@@ -30,7 +30,9 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -103,11 +105,9 @@ import org.slf4j.LoggerFactory;
 @InterfaceStability.Stable
 public final class HddsUtils {
 
-
   private static final Logger LOG = LoggerFactory.getLogger(HddsUtils.class);
 
-  public static final ByteString REDACTED =
-      ByteString.copyFromUtf8("<redacted>");
+  public static final ByteString REDACTED = ByteString.copyFromUtf8("<redacted>");
 
   private static final int ONE_MB = SizeInBytes.valueOf("1m").getSizeInt();
 
@@ -117,36 +117,30 @@ public final class HddsUtils {
   }
 
   /**
-   * Retrieve the socket address that should be used by clients to connect
-   * to the SCM.
+   * Retrieve the socket address that clients should use to connect to the SCM.
    *
    * @return Target {@code InetSocketAddress} for the SCM client endpoint.
    */
-  public static Collection<InetSocketAddress> getScmAddressForClients(
-      ConfigurationSource conf) {
-
+  public static Collection<InetSocketAddress> getScmAddressForClients(ConfigurationSource conf) {
     if (SCMHAUtils.getScmServiceId(conf) != null) {
       List<SCMNodeInfo> scmNodeInfoList = SCMNodeInfo.buildNodeInfo(conf);
-      Collection<InetSocketAddress> scmAddressList =
-          new HashSet<>(scmNodeInfoList.size());
+      Collection<InetSocketAddress> scmAddressList = new HashSet<>(scmNodeInfoList.size());
       for (SCMNodeInfo scmNodeInfo : scmNodeInfoList) {
         if (scmNodeInfo.getScmClientAddress() == null) {
           throw new ConfigurationException("Ozone scm client address is not " +
               "set for SCM service-id " + scmNodeInfo.getServiceId() +
               "node-id" + scmNodeInfo.getNodeId());
         }
-        scmAddressList.add(
-            NetUtils.createSocketAddr(scmNodeInfo.getScmClientAddress()));
+        scmAddressList.add(NetUtils.createSocketAddr(scmNodeInfo.getScmClientAddress()));
       }
       return scmAddressList;
     } else {
       String address = conf.getTrimmed(OZONE_SCM_CLIENT_ADDRESS_KEY);
-      int port = -1;
+      int port;
 
       if (address == null) {
         // fall back to ozone.scm.names for non-ha
-        Collection<String> scmAddresses =
-            conf.getTrimmedStringCollection(OZONE_SCM_NAMES);
+        Collection<String> scmAddresses = conf.getTrimmedStringCollection(OZONE_SCM_NAMES);
 
         if (scmAddresses.isEmpty()) {
           throw new ConfigurationException("Ozone scm client address is not " +
@@ -161,35 +155,26 @@ public final class HddsUtils {
 
         address = scmAddresses.iterator().next();
 
-        port = conf.getInt(OZONE_SCM_CLIENT_PORT_KEY,
-            OZONE_SCM_CLIENT_PORT_DEFAULT);
+        port = conf.getInt(OZONE_SCM_CLIENT_PORT_KEY, OZONE_SCM_CLIENT_PORT_DEFAULT);
       } else {
-        port = getHostPort(address)
-            .orElse(conf.getInt(OZONE_SCM_CLIENT_PORT_KEY,
-                OZONE_SCM_CLIENT_PORT_DEFAULT));
+        port = getHostPort(address).orElse(conf.getInt(OZONE_SCM_CLIENT_PORT_KEY, OZONE_SCM_CLIENT_PORT_DEFAULT));
       }
 
-      return Collections.singletonList(
-          NetUtils.createSocketAddr(getHostName(address).get() + ":" + port));
+      return Collections.singletonList(NetUtils.createSocketAddr(getHostName(address).get() + ":" + port));
     }
   }
 
   /**
    * Retrieve the hostname, trying the supplied config keys in order.
-   * Each config value may be absent, or if present in the format
-   * host:port (the :port part is optional).
+   * Each config value may be absent, or if present in the format host:port (the :port part is optional).
    *
    * @param conf  - Conf
    * @param keys a list of configuration key names.
-   *
    * @return first hostname component found from the given keys, or absent.
-   * @throws IllegalArgumentException if any values are not in the 'host'
-   *             or host:port format.
+   * @throws IllegalArgumentException if any values are not in the 'host' or host:port format.
    */
-  public static Optional<String> getHostNameFromConfigKeys(
-      ConfigurationSource conf,
-      String... keys) {
-    for (final String key : keys) {
+  public static Optional<String> getHostNameFromConfigKeys(ConfigurationSource conf, String... keys) {
+    for (String key : keys) {
       final String value = conf.getTrimmed(key);
       final Optional<String> hostName = getHostName(value);
       if (hostName.isPresent()) {
@@ -201,6 +186,7 @@ public final class HddsUtils {
 
   /**
    * Gets the hostname or Indicates that it is absent.
+   *
    * @param value host or host:port
    * @return hostname
    */
@@ -208,8 +194,8 @@ public final class HddsUtils {
     if ((value == null) || value.isEmpty()) {
       return Optional.empty();
     }
-    String hostname = value.replaceAll("\\:[0-9]+$", "");
-    if (hostname.length() == 0) {
+    String hostname = value.replaceAll(":[0-9]+$", "");
+    if (hostname.isEmpty()) {
       return Optional.empty();
     } else {
       return Optional.of(hostname);
@@ -218,6 +204,7 @@ public final class HddsUtils {
 
   /**
    * Gets the port if there is one, returns empty {@code OptionalInt} otherwise.
+   *
    * @param value  String in host:port format.
    * @return Port
    */
@@ -239,12 +226,10 @@ public final class HddsUtils {
    *
    * @param conf Conf
    * @param keys a list of configuration key names.
-   *
    * @return first number found from the given keys, or absent.
    */
-  public static OptionalInt getNumberFromConfigKeys(
-      ConfigurationSource conf, String... keys) {
-    for (final String key : keys) {
+  public static OptionalInt getNumberFromConfigKeys(ConfigurationSource conf, String... keys) {
+    for (String key : keys) {
       final String value = conf.getTrimmed(key);
       if (value != null) {
         return OptionalInt.of(Integer.parseInt(value));
@@ -255,19 +240,15 @@ public final class HddsUtils {
 
   /**
    * Retrieve the port number, trying the supplied config keys in order.
-   * Each config value may be absent, or if present in the format
-   * host:port (the :port part is optional).
+   * Each config value may be absent, or if present in the format host:port (the :port part is optional).
    *
    * @param conf Conf
    * @param keys a list of configuration key names.
-   *
    * @return first port number component found from the given keys, or absent.
-   * @throws IllegalArgumentException if any values are not in the 'host'
-   *             or host:port format.
+   * @throws IllegalArgumentException if any values are not in the 'host' or host:port format.
    */
-  public static OptionalInt getPortNumberFromConfigKeys(
-      ConfigurationSource conf, String... keys) {
-    for (final String key : keys) {
+  public static OptionalInt getPortNumberFromConfigKeys(ConfigurationSource conf, String... keys) {
+    for (String key : keys) {
       final String value = conf.getTrimmed(key);
       final OptionalInt hostPort = getHostPort(value);
       if (hostPort.isPresent()) {
@@ -283,48 +264,40 @@ public final class HddsUtils {
    * @return A collection of SCM addresses
    * @throws IllegalArgumentException If the configuration is invalid
    */
-  public static Collection<InetSocketAddress> getSCMAddressForDatanodes(
-      ConfigurationSource conf) {
+  public static Collection<InetSocketAddress> getSCMAddressForDatanodes(ConfigurationSource conf) {
 
     // First check HA style config, if not defined fall back to OZONE_SCM_NAMES
 
     if (SCMHAUtils.getScmServiceId(conf) != null) {
       List<SCMNodeInfo> scmNodeInfoList = SCMNodeInfo.buildNodeInfo(conf);
-      Collection<InetSocketAddress> scmAddressList =
-          new HashSet<>(scmNodeInfoList.size());
+      Collection<InetSocketAddress> scmAddressList = new HashSet<>(scmNodeInfoList.size());
       for (SCMNodeInfo scmNodeInfo : scmNodeInfoList) {
-        scmAddressList.add(
-            NetUtils.createSocketAddr(scmNodeInfo.getScmDatanodeAddress()));
+        scmAddressList.add(NetUtils.createSocketAddr(scmNodeInfo.getScmDatanodeAddress()));
       }
       return scmAddressList;
     } else {
       // fall back to OZONE_SCM_NAMES.
-      Collection<String> names =
-          conf.getTrimmedStringCollection(ScmConfigKeys.OZONE_SCM_NAMES);
+      Collection<String> names = conf.getTrimmedStringCollection(ScmConfigKeys.OZONE_SCM_NAMES);
       if (names.isEmpty()) {
         throw new IllegalArgumentException(ScmConfigKeys.OZONE_SCM_NAMES
-            + " need to be a set of valid DNS names or IP addresses."
-            + " Empty address list found.");
+            + " need to be a set of valid DNS names or IP addresses. Empty address list found.");
       }
 
       Collection<InetSocketAddress> addresses = new HashSet<>(names.size());
       for (String address : names) {
         Optional<String> hostname = getHostName(address);
         if (!hostname.isPresent()) {
-          throw new IllegalArgumentException("Invalid hostname for SCM: "
-              + address);
+          throw new IllegalArgumentException("Invalid hostname for SCM: " + address);
         }
         int port = getHostPort(address)
-            .orElse(conf.getInt(OZONE_SCM_DATANODE_PORT_KEY,
-                OZONE_SCM_DATANODE_PORT_DEFAULT));
-        InetSocketAddress addr = NetUtils.createSocketAddr(hostname.get(),
-            port);
+            .orElse(conf.getInt(OZONE_SCM_DATANODE_PORT_KEY, OZONE_SCM_DATANODE_PORT_DEFAULT));
+        InetSocketAddress addr = NetUtils.createSocketAddr(hostname.get(), port);
         addresses.add(addr);
       }
 
       if (addresses.size() > 1) {
-        LOG.warn("When SCM HA is configured, configure {} appended with " +
-            "serviceId and nodeId. {} is deprecated.", OZONE_SCM_ADDRESS_KEY,
+        LOG.warn("When SCM HA is configured, configure {} appended with serviceId and nodeId. {} is deprecated.",
+            OZONE_SCM_ADDRESS_KEY,
             OZONE_SCM_NAMES);
       }
       return addresses;
@@ -337,49 +310,40 @@ public final class HddsUtils {
    * @return Recon address
    * @throws IllegalArgumentException If the configuration is invalid
    */
-  public static InetSocketAddress getReconAddresses(
-      ConfigurationSource conf) {
+  public static InetSocketAddress getReconAddresses(ConfigurationSource conf) {
     String name = conf.get(OZONE_RECON_ADDRESS_KEY);
     if (StringUtils.isEmpty(name)) {
       return null;
     }
     Optional<String> hostname = getHostName(name);
     if (!hostname.isPresent()) {
-      throw new IllegalArgumentException("Invalid hostname for Recon: "
-          + name);
+      throw new IllegalArgumentException("Invalid hostname for Recon: " + name);
     }
     int port = getHostPort(name).orElse(OZONE_RECON_DATANODE_PORT_DEFAULT);
     return NetUtils.createSocketAddr(hostname.get(), port);
   }
 
   /**
-   * Returns the hostname for this datanode. If the hostname is not
-   * explicitly configured in the given config, then it is determined
-   * via the DNS class.
+   * Returns the hostname for this datanode.
+   * If the hostname is not explicitly configured in the given config, then it is determined via the DNS class.
    *
    * @param conf Configuration
-   *
    * @return the hostname (NB: may not be a FQDN)
-   * @throws UnknownHostException if the dfs.datanode.dns.interface
-   *    option is used and the hostname can not be determined
+   * @throws UnknownHostException if the dfs.datanode.dns.interface option is used and the hostname cannot be determined
    */
-  public static String getHostName(ConfigurationSource conf)
-      throws UnknownHostException {
+  public static String getHostName(ConfigurationSource conf) throws UnknownHostException {
     String name = conf.get(DFS_DATANODE_HOST_NAME_KEY);
     if (name == null) {
-      String dnsInterface = conf.get(
-          CommonConfigurationKeysPublic.HADOOP_SECURITY_DNS_INTERFACE_KEY);
-      String nameServer = conf.get(
-          CommonConfigurationKeysPublic.HADOOP_SECURITY_DNS_NAMESERVER_KEY);
+      String dnsInterface = conf.get(CommonConfigurationKeysPublic.HADOOP_SECURITY_DNS_INTERFACE_KEY);
+      String nameServer = conf.get(CommonConfigurationKeysPublic.HADOOP_SECURITY_DNS_NAMESERVER_KEY);
       boolean fallbackToHosts = false;
 
       if (dnsInterface == null) {
         // Try the legacy configuration keys.
         dnsInterface = conf.get(DFS_DATANODE_DNS_INTERFACE_KEY);
-        dnsInterface = conf.get(DFS_DATANODE_DNS_INTERFACE_KEY);
         nameServer = conf.get(DFS_DATANODE_DNS_NAMESERVER_KEY);
       } else {
-        // If HADOOP_SECURITY_DNS_* is set then also attempt hosts file
+        // If HADOOP_SECURITY_DNS_* is set, then also attempt hosts file
         // resolution if DNS fails. We will not use hosts file resolution
         // by default to avoid breaking existing clusters.
         fallbackToHosts = true;
@@ -391,31 +355,28 @@ public final class HddsUtils {
   }
 
   /**
-   * Retrieve the socket address that is used by Datanode.
-   * @param conf
+   * Retrieve the socket address used by Datanode.
+   *
+   * @param conf Ozone configuration.
    * @return Target InetSocketAddress for the Datanode service endpoint.
    */
-  public static InetSocketAddress
-      getDatanodeRpcAddress(ConfigurationSource conf) {
-    final String host = getHostNameFromConfigKeys(conf,
-        HDDS_DATANODE_CLIENT_BIND_HOST_KEY)
+  public static InetSocketAddress getDatanodeRpcAddress(ConfigurationSource conf) {
+    final String host = getHostNameFromConfigKeys(conf, HDDS_DATANODE_CLIENT_BIND_HOST_KEY)
         .orElse(HDDS_DATANODE_CLIENT_BIND_HOST_DEFAULT);
 
-    final int port = getPortNumberFromConfigKeys(conf,
-        HDDS_DATANODE_CLIENT_ADDRESS_KEY)
-        .orElse(conf.getInt(HDDS_DATANODE_CLIENT_PORT_KEY,
-            HDDS_DATANODE_CLIENT_PORT_DEFAULT));
+    final int port = getPortNumberFromConfigKeys(conf, HDDS_DATANODE_CLIENT_ADDRESS_KEY)
+        .orElse(conf.getInt(HDDS_DATANODE_CLIENT_PORT_KEY, HDDS_DATANODE_CLIENT_PORT_DEFAULT));
 
     return NetUtils.createSocketAddr(host + ":" + port);
   }
 
   /**
-   * Checks if the container command is read only or not.
+   * Checks if the container command is read-only or not.
+   *
    * @param proto ContainerCommand Request proto
-   * @return True if its readOnly , false otherwise.
+   * @return {@code true} if its read-only, {@code false} otherwise.
    */
-  public static boolean isReadOnly(
-      ContainerCommandRequestProtoOrBuilder proto) {
+  public static boolean isReadOnly(ContainerCommandRequestProtoOrBuilder proto) {
     switch (proto.getCmdType()) {
     case ReadContainer:
     case ReadChunk:
@@ -448,8 +409,7 @@ public final class HddsUtils {
   }
 
   /**
-   * Returns true if the container is in open to write state
-   * (OPEN or RECOVERING).
+   * Returns {@code true} if the container is in open to write state ({@link State#OPEN} or {@link State#RECOVERING}).
    *
    * @param state - container state
    */
@@ -458,18 +418,15 @@ public final class HddsUtils {
   }
 
   /**
-   * Not all datanode container cmd protocol has embedded ozone block token.
-   * Block token are issued by Ozone Manager and return to Ozone client to
-   * read/write data on datanode via input/output stream.
-   * Ozone datanode uses this helper to decide which command requires block
-   * token.
-   * @return true if it is a cmd that block token should be checked when
-   * security is enabled
-   * false if block token does not apply to the command.
+   * Not all datanode container cmd protocols have embedded ozone block token.
+   * Block token is issued by Ozone Manager and returns to an Ozone client
+   * to read/write data on datanode via input/output stream.
+   * Ozone datanode uses this helper to decide which command requires block token.
    *
+   * @return {@code true} if it is a cmd that block token should be checked
+   * when security is enabled {@code false} if block token does not apply to the command.
    */
-  public static boolean requireBlockToken(
-      ContainerProtos.Type cmdType) {
+  public static boolean requireBlockToken(ContainerProtos.Type cmdType) {
     switch (cmdType) {
     case DeleteBlock:
     case DeleteChunk:
@@ -487,8 +444,14 @@ public final class HddsUtils {
     }
   }
 
-  public static boolean requireContainerToken(
-      ContainerProtos.Type cmdType) {
+  /**
+   * Determines if a specific container command type requires a container token.
+   *
+   * @param cmdType the type of the container command being checked
+   * @return {@code true} if the container command type requires a container token,
+   *         {@code false} otherwise
+   */
+  public static boolean requireContainerToken(ContainerProtos.Type cmdType) {
     switch (cmdType) {
     case CloseContainer:
     case CreateContainer:
@@ -504,6 +467,7 @@ public final class HddsUtils {
 
   /**
    * Return the block ID of container commands that are related to blocks.
+   *
    * @param msg container command
    * @return block ID.
    */
@@ -576,8 +540,7 @@ public final class HddsUtils {
 
   /**
    * Register the provided MBean with additional JMX ObjectName properties.
-   * If additional properties are not supported then fallback to registering
-   * without properties.
+   * If additional properties are not supported, then fallback to registering without properties.
    *
    * @param serviceName - see {@link MBeans#register}
    * @param mBeanName - see {@link MBeans#register}
@@ -585,33 +548,25 @@ public final class HddsUtils {
    * @param mBean - the MBean to register.
    * @return the named used to register the MBean.
    */
-  public static ObjectName registerWithJmxProperties(
-      String serviceName, String mBeanName, Map<String, String> jmxProperties,
-      Object mBean) {
+  public static ObjectName registerWithJmxProperties(String serviceName, String mBeanName,
+      Map<String, String> jmxProperties, Object mBean) {
     try {
-
       // Check support for registering with additional properties.
-      final Method registerMethod = MBeans.class.getMethod(
-          "register", String.class, String.class,
+      final Method registerMethod = MBeans.class.getMethod("register", String.class, String.class,
           Map.class, Object.class);
 
-      return (ObjectName) registerMethod.invoke(
-          null, serviceName, mBeanName, jmxProperties, mBean);
+      return (ObjectName) registerMethod.invoke(null, serviceName, mBeanName, jmxProperties, mBean);
 
-    } catch (NoSuchMethodException | IllegalAccessException |
-        InvocationTargetException e) {
-
+    } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
       // Fallback
-      if (LOG.isTraceEnabled()) {
-        LOG.trace("Registering MBean {} without additional properties {}",
-            mBeanName, jmxProperties);
-      }
+      LOG.trace("Registering MBean {} without additional properties {}", mBeanName, jmxProperties);
       return MBeans.register(serviceName, mBeanName, mBean);
     }
   }
 
   /**
    * Get the current time in milliseconds.
+   *
    * @return the current time in milliseconds.
    */
   public static long getTime() {
@@ -621,52 +576,54 @@ public final class HddsUtils {
   /**
    * Basic validation for {@code path}: checks that it is a descendant of
    * (or the same as) the given {@code ancestor}.
-   * @param path the path to be validated
-   * @param ancestor a trusted path that is supposed to be the ancestor of
-   *     {@code path}
-   * @throws NullPointerException if either {@code path} or {@code ancestor} is
-   *     null
-   * @throws IllegalArgumentException if {@code ancestor} is not really the
-   *     ancestor of {@code path}
+   *
+   * @param path the path to be validated.
+   * @param ancestor a trusted path that is supposed to be the ancestor of {@code path}.
+   * @throws NullPointerException if either {@code path} or {@code ancestor} is {@code null}.
+   * @throws IllegalArgumentException if {@code ancestor} is not really the ancestor of {@code path}
    */
   public static void validatePath(Path path, Path ancestor) {
-    Preconditions.checkNotNull(path,
-        "Path should not be null");
-    Preconditions.checkNotNull(ancestor,
-        "Ancestor should not be null");
-    Preconditions.checkArgument(
-        path.normalize().startsWith(ancestor.normalize()),
+    Preconditions.checkNotNull(path, "Path should not be null");
+    Preconditions.checkNotNull(ancestor, "Ancestor should not be null");
+    Preconditions.checkArgument(path.normalize().startsWith(ancestor.normalize()),
         "Path should be a descendant of %s", ancestor);
   }
 
+  /**
+   * Creates a directory based on the provided directory path.
+   * If the specified directory does not exist or is not a directory, it throws an {@link IllegalArgumentException}.
+   *
+   * @param dirPath The path of the directory to be created.
+   * @return A File object representing the directory.
+   * @throws IllegalArgumentException if the path cannot be created as a directory.
+   */
   public static File createDir(String dirPath) {
-    File dirFile = new File(dirPath);
-    if (!dirFile.mkdirs() && !dirFile.exists()) {
-      throw new IllegalArgumentException("Unable to create path: " + dirFile);
+    Path dirFile = Paths.get(dirPath);
+    try {
+      Files.createDirectories(dirFile);
+    } catch (IOException e) {
+      throw new IllegalArgumentException("Unable to create path: " + dirFile, e);
     }
-    return dirFile;
+    return dirFile.toFile();
   }
 
   /**
    * Utility string formatter method to display SCM roles.
    *
-   * @param nodes
-   * @return String
+   * @param nodes a list of nodes represented in the format "HostName:RatisPort:Role"
+   * @return a formatted string representing the list of nodes in structured form
    */
   public static String format(List<String> nodes) {
     StringBuilder sb = new StringBuilder();
     for (String node : nodes) {
       String[] x = node.split(":");
-      sb.append(String
-          .format("{ HostName : %s, Ratis Port : %s, Role : %s } ", x[0], x[1],
-              x[2]));
+      sb.append(String.format("{ HostName : %s, Ratis Port : %s, Role : %s } ", x[0], x[1], x[2]));
     }
     return sb.toString();
   }
 
   /**
    * Return Ozone service shutdown time out.
-   * @param conf
    */
   public static long getShutDownTimeOut(ConfigurationSource conf) {
     return conf.getObject(OzoneServiceConfig.class).getServiceShutdownTimeout();
@@ -681,9 +638,7 @@ public final class HddsUtils {
 
   /**
    * Unwrap exception to check if it is some kind of access control problem
-   * ({@link org.apache.hadoop.security.AccessControlException} or
-   * {@link org.apache.hadoop.security.token.SecretManager.InvalidToken})
-   * or a RpcException.
+   * ({@link AccessControlException} or {@link SecretManager.InvalidToken}) or a {@link RpcException}.
    */
   public static Throwable getUnwrappedException(Exception ex) {
     Throwable t = ex;
@@ -694,9 +649,7 @@ public final class HddsUtils {
       t = ((RemoteException) t).unwrapRemoteException();
     }
     while (t != null) {
-      if (t instanceof RpcException ||
-          t instanceof AccessControlException ||
-          t instanceof SecretManager.InvalidToken) {
+      if (t instanceof RpcException || t instanceof AccessControlException || t instanceof SecretManager.InvalidToken) {
         break;
       }
       Throwable cause = t.getCause();
@@ -709,28 +662,24 @@ public final class HddsUtils {
   }
 
   /**
-   * For some Rpc Exceptions, client should not failover.
+   * For some Rpc Exceptions, a client should not fail over.
    */
   public static boolean shouldNotFailoverOnRpcException(Throwable exception) {
     if (exception instanceof RpcException) {
-      // Should not failover for following exceptions
-      if (exception instanceof RpcNoSuchMethodException ||
-          exception instanceof RpcNoSuchProtocolException ||
-          exception instanceof RPC.VersionMismatch) {
+      // Should not fail over for the following exceptions
+      if (exception instanceof RpcNoSuchMethodException || exception instanceof RpcNoSuchProtocolException
+          || exception instanceof RPC.VersionMismatch) {
         return true;
       }
-      if (exception.getMessage().contains(
-          "RPC response exceeds maximum data length") ||
-          exception.getMessage().contains("RPC response has invalid length")) {
-        return true;
-      }
+      return exception.getMessage().contains("RPC response exceeds maximum data length")
+          || exception.getMessage().contains("RPC response has invalid length");
     }
     return exception instanceof InvalidProtocolBufferException;
   }
 
   /**
-   * Remove binary data from request {@code msg}.  (May be incomplete, feel
-   * free to add any missing cleanups.)
+   * Remove binary data from request {@code msg}.
+   * Maybe incomplete, feel free to add any missing cleanups.
    */
   public static ContainerProtos.ContainerCommandRequestProto processForDebug(
       ContainerProtos.ContainerCommandRequestProto msg) {
@@ -740,8 +689,7 @@ public final class HddsUtils {
     }
 
     if (msg.hasWriteChunk() || msg.hasPutSmallFile()) {
-      ContainerProtos.ContainerCommandRequestProto.Builder builder =
-          msg.toBuilder();
+      ContainerProtos.ContainerCommandRequestProto.Builder builder = msg.toBuilder();
       if (msg.hasWriteChunk()) {
         builder.getWriteChunkBuilder().setData(REDACTED);
       }
@@ -755,8 +703,8 @@ public final class HddsUtils {
   }
 
   /**
-   * Remove binary data from response {@code msg}.  (May be incomplete, feel
-   * free to add any missing cleanups.)
+   * Remove binary data from response {@code msg}.
+   * Maybe incomplete, feel free to add any missing cleanups.
    */
   public static ContainerProtos.ContainerCommandResponseProto processForDebug(
       ContainerProtos.ContainerCommandResponseProto msg) {
@@ -766,8 +714,7 @@ public final class HddsUtils {
     }
 
     if (msg.hasReadChunk() || msg.hasGetSmallFile()) {
-      ContainerProtos.ContainerCommandResponseProto.Builder builder =
-          msg.toBuilder();
+      ContainerProtos.ContainerCommandResponseProto.Builder builder = msg.toBuilder();
       if (msg.hasReadChunk()) {
         if (msg.getReadChunk().hasData()) {
           builder.getReadChunkBuilder().setData(REDACTED);
@@ -797,7 +744,7 @@ public final class HddsUtils {
 
   /**
    * Redacts sensitive configuration.
-   * Sorts all properties by key name
+   * Sorts all properties by key name.
    *
    * @param conf OzoneConfiguration object to be printed.
    * @return Sorted Map of properties
@@ -816,6 +763,13 @@ public final class HddsUtils {
     return sortedOzoneProps;
   }
 
+  /**
+   * Generates a thread name prefix based on the given identifier.
+   *
+   * @param id an identifier object;
+   *          if non-null and non-empty, it will be converted to a string and appended with a hyphen.
+   * @return a string prefix based on the identifier, or an empty string if the identifier is null or empty.
+   */
   @Nonnull
   public static String threadNamePrefix(@Nullable Object id) {
     return id != null && !"".equals(id)
@@ -824,11 +778,9 @@ public final class HddsUtils {
   }
 
   /**
-   * Execute some code and ensure thread name is not changed
-   * (workaround for HADOOP-18433).
+   * Execute some code and ensure the thread name is not changed (workaround for HADOOP-18433).
    */
-  public static <T, E extends IOException> T preserveThreadName(
-      CheckedSupplier<T, E> supplier) throws E {
+  public static <T, E extends IOException> T preserveThreadName(CheckedSupplier<T, E> supplier) throws E {
     final Thread thread = Thread.currentThread();
     final String threadName = thread.getName();
 
@@ -846,8 +798,7 @@ public final class HddsUtils {
    * Transform a protobuf UUID to Java UUID.
    */
   public static UUID fromProtobuf(HddsProtos.UUID uuid) {
-    Objects.requireNonNull(uuid,
-        "HddsProtos.UUID can't be null to transform to java UUID.");
+    Objects.requireNonNull(uuid, "HddsProtos.UUID can't be null to transform to java UUID.");
     return new UUID(uuid.getMostSigBits(), uuid.getLeastSigBits());
   }
 
@@ -855,18 +806,17 @@ public final class HddsUtils {
    * Transform a Java UUID to protobuf UUID.
    */
   public static HddsProtos.UUID toProtobuf(UUID uuid) {
-    Objects.requireNonNull(uuid,
-        "UUID can't be null to transform to protobuf UUID.");
+    Objects.requireNonNull(uuid, "UUID can't be null to transform to protobuf UUID.");
     return HddsProtos.UUID.newBuilder()
         .setMostSigBits(uuid.getMostSignificantBits())
         .setLeastSigBits(uuid.getLeastSignificantBits())
         .build();
   }
 
-  /** Concatenate stack trace {@code elements} (one per line) starting at
-   * {@code startIndex}. */
-  public static @Nonnull String formatStackTrace(
-      @Nullable StackTraceElement[] elements, int startIndex) {
+  /**
+   * Concatenate stack trace {@code elements} (one per line) starting at {@code startIndex}.
+   */
+  public static @Nonnull String formatStackTrace(@Nullable StackTraceElement[] elements, int startIndex) {
     if (elements != null && elements.length > startIndex) {
       final StringBuilder sb = new StringBuilder();
       for (int line = startIndex; line < elements.length; line++) {
@@ -878,8 +828,7 @@ public final class HddsUtils {
   }
 
   /** @return current thread stack trace if {@code logger} has debug enabled */
-  public static @Nullable StackTraceElement[] getStackTrace(
-      @Nonnull Logger logger) {
+  public static @Nullable StackTraceElement[] getStackTrace(@Nonnull Logger logger) {
     return logger.isDebugEnabled()
         ? Thread.currentThread().getStackTrace()
         : null;

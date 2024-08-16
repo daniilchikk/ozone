@@ -30,6 +30,7 @@ import org.apache.hadoop.hdds.upgrade.HDDSLayoutFeature;
 import org.apache.hadoop.hdds.utils.db.BatchOperation;
 import org.apache.hadoop.hdds.utils.db.Table;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
+import org.apache.hadoop.ozone.container.common.impl.BlockDeletingService;
 import org.apache.hadoop.ozone.container.common.interfaces.Container;
 import org.apache.hadoop.ozone.container.common.interfaces.DBHandle;
 import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainer;
@@ -48,15 +49,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * This class is for performing block related operations on the KeyValue
- * Container.
+ * This class is for performing block related operations on the KeyValue Container.
  */
 public class BlockManagerImpl implements BlockManager {
 
-  public static final Logger LOG =
-      LoggerFactory.getLogger(BlockManagerImpl.class);
+  public static final Logger LOG = LoggerFactory.getLogger(BlockManagerImpl.class);
 
-  private ConfigurationSource config;
+  private final ConfigurationSource config;
 
   private static final String DB_NULL_ERR_MSG = "DB cannot be null here";
   public static final String FULL_CHUNK = "full";
@@ -91,66 +90,67 @@ public class BlockManagerImpl implements BlockManager {
   }
 
   @Override
-  public long putBlock(Container container, BlockData data,
-      boolean endOfBlock) throws IOException {
-    return persistPutBlock(
-        (KeyValueContainer) container,
-        data, endOfBlock);
+  public long putBlock(Container container, BlockData data, boolean endOfBlock) throws IOException {
+    return persistPutBlock((KeyValueContainer) container, data, endOfBlock);
   }
 
-  public long persistPutBlock(KeyValueContainer container,
-      BlockData data, boolean endOfBlock)
-      throws IOException {
-    Preconditions.checkNotNull(data, "BlockData cannot be null for put " +
-        "operation.");
-    Preconditions.checkState(data.getContainerID() >= 0, "Container Id " +
-        "cannot be negative");
+  /**
+   * Persists a block into the key-value container. This method is responsible
+   * for updating the state of the container along with the block metadata. It
+   * ensures that the block data is correctly stored in the associated DB and
+   * handles potential conflicts during the process.
+   *
+   * @param container The key-value container where the block data will be stored.
+   * @param data The block data to be persisted.
+   * @param endOfBlock A flag indicating whether this is the final chunk of the block.
+   * @return The size of the block that was persisted.
+   * @throws IOException If an I/O error occurs during the operation.
+   */
+  public long persistPutBlock(KeyValueContainer container, BlockData data, boolean endOfBlock) throws IOException {
+    Preconditions.checkNotNull(data, "BlockData cannot be null for put operation.");
+    Preconditions.checkState(data.getContainerID() >= 0, "Container Id cannot be negative");
 
     KeyValueContainerData containerData = container.getContainerData();
 
-    // We are not locking the key manager since LevelDb serializes all actions
-    // against a single DB. We rely on DB level locking to avoid conflicts.
+    // We are not locking the key manager since LevelDb serializes all actions against a single DB.
+    // We rely on DB level locking to avoid conflicts.
     try (DBHandle db = BlockUtils.getDB(containerData, config)) {
-      // This is a post condition that acts as a hint to the user.
+      // This is a post-condition that acts as a hint to the user.
       // Should never fail.
       Preconditions.checkNotNull(db, DB_NULL_ERR_MSG);
 
       long bcsId = data.getBlockCommitSequenceId();
       long containerBCSId = containerData.getBlockCommitSequenceId();
 
-      // default blockCommitSequenceId for any block is 0. It the putBlock
-      // request is not coming via Ratis(for test scenarios), it will be 0.
+      // Default blockCommitSequenceId for any block is 0.
+      // It the putBlock request is not coming via Ratis(for test scenarios), it will be 0.
       // In such cases, we should overwrite the block as well
       if ((bcsId != 0) && (bcsId <= containerBCSId)) {
-        // Since the blockCommitSequenceId stored in the db is greater than
-        // equal to blockCommitSequenceId to be updated, it means the putBlock
-        // transaction is reapplied in the ContainerStateMachine on restart.
+        // Since the blockCommitSequenceId stored in the db is greater than equal to blockCommitSequenceId
+        // to be updated,
+        // it means the putBlock transaction is reapplied in the ContainerStateMachine on restart.
         // It also implies that the given block must already exist in the db.
-        // just log and return
-        LOG.debug("blockCommitSequenceId {} in the Container Db is greater"
-                + " than the supplied value {}. Ignoring it",
-            containerBCSId, bcsId);
+        // Log and return
+        LOG.debug("blockCommitSequenceId {} in the Container Db is greater than the supplied value {}. Ignoring it",
+            containerBCSId,
+            bcsId);
         return data.getSize();
       }
 
-      // Check if the block is present in the pendingPutBlockCache for the
-      // container to determine whether the blockCount is already incremented
-      // for this block in the DB or not.
+      // Check if the block is present in the pendingPutBlockCache for the container to determine
+      // whether the blockCount is already incremented for this block in the DB or not.
       long localID = data.getLocalID();
       boolean isBlockInCache = container.isBlockInPendingPutBlockCache(localID);
       boolean incrBlockCount = false;
 
-      // update the blockData as well as BlockCommitSequenceId here
-      try (BatchOperation batch = db.getStore().getBatchHandler()
-          .initBatchOperation()) {
-        // If the block does not exist in the pendingPutBlockCache of the
-        // container, then check the DB to ascertain if it exists or not.
-        // If block exists in cache, blockCount should not be incremented.
+      // Update the blockData as well as BlockCommitSequenceId here
+      try (BatchOperation batch = db.getStore().getBatchHandler().initBatchOperation()) {
+        // If the block does not exist in the pendingPutBlockCache of the container,
+        // then check the DB to figure out if it exists or not.
+        // If a block exists in cache, blockCount should not be incremented.
         if (!isBlockInCache) {
-          if (db.getStore().getBlockDataTable().get(
-              containerData.getBlockKey(localID)) == null) {
-            // Block does not exist in DB => blockCount needs to be
-            // incremented when the block is added into DB.
+          if (db.getStore().getBlockDataTable().get(containerData.getBlockKey(localID)) == null) {
+            // Block does not exist in DB ⇒ blockCount needs to be incremented when the block is added into DB.
             incrBlockCount = true;
           }
         }
@@ -158,33 +158,31 @@ public class BlockManagerImpl implements BlockManager {
         boolean incrementalEnabled = true;
         if (!VersionedDatanodeFeatures.isFinalized(HDDSLayoutFeature.HBASE_SUPPORT)) {
           if (isPartialChunkList(data)) {
-            throw new StorageContainerException("DataNode has not finalized " +
-                "upgrading to a version that supports incremental chunk list.", UNSUPPORTED_REQUEST);
+            throw new StorageContainerException("DataNode has not finalized upgrading to a version" +
+                " that supports incremental chunk list.", UNSUPPORTED_REQUEST);
           }
           incrementalEnabled = false;
         }
-        db.getStore().putBlockByID(batch, incrementalEnabled, localID, data,
-            containerData, endOfBlock);
+        db.getStore().putBlockByID(batch, incrementalEnabled, localID, data, containerData, endOfBlock);
         if (bcsId != 0) {
-          db.getStore().getMetadataTable().putWithBatch(
-              batch, containerData.getBcsIdKey(), bcsId);
+          db.getStore().getMetadataTable().putWithBatch(batch, containerData.getBcsIdKey(), bcsId);
         }
 
-        // Set Bytes used, this bytes used will be updated for every write and
-        // only get committed for every put block. In this way, when datanode
-        // is up, for computation of disk space by container only committed
-        // block length is used, And also on restart the blocks committed to DB
-        // is only used to compute the bytes used. This is done to keep the
-        // current behavior and avoid DB write during write chunk operation.
-        db.getStore().getMetadataTable().putWithBatch(
-            batch, containerData.getBytesUsedKey(),
-            containerData.getBytesUsed());
+        // Set Bytes used,
+        // these bytes used will be updated for every writing and only get committed for every put block.
+        // In this way, when datanode is up,
+        // for computation of disk space by container only committed block length is used,
+        // and also on restart the blocks committed to DB is only used to compute the bytes used.
+        // This is done to keep the current behavior and avoid DB write during write chunk operation.
+        db.getStore()
+            .getMetadataTable()
+            .putWithBatch(batch, containerData.getBytesUsedKey(), containerData.getBytesUsed());
 
         // Set Block Count for a container.
         if (incrBlockCount) {
-          db.getStore().getMetadataTable().putWithBatch(
-              batch, containerData.getBlockCountKey(),
-              containerData.getBlockCount() + 1);
+          db.getStore()
+              .getMetadataTable()
+              .putWithBatch(batch, containerData.getBlockCountKey(), containerData.getBlockCount() + 1);
         }
 
         db.getStore().getBatchHandler().commitBatchOperation(batch);
@@ -194,55 +192,48 @@ public class BlockManagerImpl implements BlockManager {
         container.updateBlockCommitSequenceId(bcsId);
       }
 
-      // Increment block count and add block to pendingPutBlockCache
-      // in-memory after the DB update.
+      // Increment block count and add block to pendingPutBlockCache in-memory after the DB update.
       if (incrBlockCount) {
         containerData.incrBlockCount();
       }
 
       // If the Block is not in PendingPutBlockCache (and it is not endOfBlock),
-      // add it there so that subsequent putBlock calls for this block do not
-      // have to read the DB to check for block existence
+      // add it there
+      // so that later putBlock calls for this block do not have to read the DB to check for block existence
       if (!isBlockInCache && !endOfBlock) {
         container.addToPendingPutBlockCache(localID);
       } else if (isBlockInCache && endOfBlock) {
-        // Remove the block from the PendingPutBlockCache as there would not
-        // be any more writes to this block
+        // Remove the block from the PendingPutBlockCache as there would not be anymore writes to this block
         container.removeFromPendingPutBlockCache(localID);
       }
 
-      if (LOG.isDebugEnabled()) {
-        LOG.debug(
-            "Block " + data.getBlockID() + " successfully committed with bcsId "
-                + bcsId + " chunk size " + data.getChunks().size());
-      }
+      LOG.debug("Block {} successfully committed with bcsId {} chunk size {}",
+          data.getBlockID(),
+          bcsId,
+          data.getChunks().size());
       return data.getSize();
     }
   }
 
   @Override
-  public void finalizeBlock(Container container, BlockID blockId)
-      throws IOException {
-    Preconditions.checkNotNull(blockId, "blockId cannot " +
-        "be null for finalizeBlock operation.");
-    Preconditions.checkState(blockId.getContainerID() >= 0,
-        "Container Id cannot be negative");
+  public void finalizeBlock(Container container, BlockID blockId) throws IOException {
+    Preconditions.checkNotNull(blockId, "blockId cannot be null for finalizeBlock operation.");
+    Preconditions.checkState(blockId.getContainerID() >= 0, "Container Id cannot be negative");
 
     KeyValueContainer kvContainer = (KeyValueContainer)container;
     long localID = blockId.getLocalID();
 
     kvContainer.removeFromPendingPutBlockCache(localID);
 
-    try (DBHandle db = BlockUtils.getDB(kvContainer.getContainerData(),
-        config)) {
+    try (DBHandle db = BlockUtils.getDB(kvContainer.getContainerData(), config)) {
       // Should never fail.
       Preconditions.checkNotNull(db, DB_NULL_ERR_MSG);
 
       // persist finalizeBlock
-      try (BatchOperation batch = db.getStore().getBatchHandler()
-          .initBatchOperation()) {
-        db.getStore().getFinalizeBlocksTable().putWithBatch(batch,
-            kvContainer.getContainerData().getBlockKey(localID), localID);
+      try (BatchOperation batch = db.getStore().getBatchHandler().initBatchOperation()) {
+        db.getStore()
+            .getFinalizeBlocksTable()
+            .putWithBatch(batch, kvContainer.getContainerData().getBlockKey(localID), localID);
         db.getStore().getBatchHandler().commitBatchOperation(batch);
 
         mergeLastChunkForBlockFinalization(blockId, db, kvContainer, batch, localID);
@@ -250,48 +241,41 @@ public class BlockManagerImpl implements BlockManager {
     }
   }
 
-  private void mergeLastChunkForBlockFinalization(BlockID blockId, DBHandle db,
-                         KeyValueContainer kvContainer, BatchOperation batch,
-                         long localID) throws IOException {
-    // if the chunk list of the block to be finalized was written incremental,
-    // merge the last chunk into block data.
+  private void mergeLastChunkForBlockFinalization(BlockID blockId, DBHandle db, KeyValueContainer kvContainer,
+      BatchOperation batch, long localID) throws IOException {
+    // If the chunk list of the block to be finalized was written incremental, merge the last chunk into block data.
     BlockData blockData = getBlockByID(db, blockId, kvContainer.getContainerData());
     if (blockData.getMetadata().containsKey(INCREMENTAL_CHUNK_LIST)) {
       BlockData emptyBlockData = new BlockData(blockId);
       emptyBlockData.addMetadata(INCREMENTAL_CHUNK_LIST, "");
-      db.getStore().putBlockByID(batch, true, localID,
-          emptyBlockData, kvContainer.getContainerData(), true);
+      db.getStore()
+          .putBlockByID(batch, true, localID, emptyBlockData, kvContainer.getContainerData(), true);
     }
   }
 
   @Override
   public BlockData getBlock(Container container, BlockID blockID) throws IOException {
     BlockUtils.verifyBCSId(container, blockID);
-    KeyValueContainerData containerData = (KeyValueContainerData) container
-        .getContainerData();
+    KeyValueContainerData containerData = (KeyValueContainerData) container.getContainerData();
     long bcsId = blockID.getBlockCommitSequenceId();
     try (DBHandle db = BlockUtils.getDB(containerData, config)) {
-      // This is a post condition that acts as a hint to the user.
-      // Should never fail.
+      // This is a post-condition that acts as a hint to the user. Should never fail.
       Preconditions.checkNotNull(db, DB_NULL_ERR_MSG);
       BlockData blockData = getBlockByID(db, blockID, containerData);
       long id = blockData.getBlockID().getBlockCommitSequenceId();
       if (id < bcsId) {
-        throw new StorageContainerException(
-            "bcsId " + bcsId + " mismatches with existing block Id "
-                + id + " for block " + blockID + ".", BCSID_MISMATCH);
+        throw new StorageContainerException("bcsId " + bcsId + " mismatches with existing block Id " + id
+            + " for block " + blockID + ".", BCSID_MISMATCH);
       }
       return blockData;
     }
   }
 
   @Override
-  public long getCommittedBlockLength(Container container, BlockID blockID)
-      throws IOException {
-    KeyValueContainerData containerData = (KeyValueContainerData) container
-        .getContainerData();
+  public long getCommittedBlockLength(Container container, BlockID blockID) throws IOException {
+    KeyValueContainerData containerData = (KeyValueContainerData) container.getContainerData();
     try (DBHandle db = BlockUtils.getDB(containerData, config)) {
-      // This is a post condition that acts as a hint to the user.
+      // This is a post-condition that acts as a hint to the user.
       // Should never fail.
       Preconditions.checkNotNull(db, DB_NULL_ERR_MSG);
       BlockData blockData = getBlockByID(db, blockID, containerData);
@@ -304,6 +288,7 @@ public class BlockManagerImpl implements BlockManager {
     return defaultReadBufferCapacity;
   }
 
+  @Override
   public int getReadMappedBufferThreshold() {
     return readMappedBufferThreshold;
   }
@@ -315,42 +300,34 @@ public class BlockManagerImpl implements BlockManager {
 
   /**
    * Deletes an existing block.
-   * As Deletion is handled by BlockDeletingService,
-   * UnsupportedOperationException is thrown always
+   * As Deletion is handled by {@link BlockDeletingService}, {@link UnsupportedOperationException} is thrown always.
    *
    * @param container - Container from which block need to be deleted.
    * @param blockID - ID of the block.
    */
   @Override
-  public void deleteBlock(Container container, BlockID blockID) throws
-      IOException {
+  public void deleteBlock(Container container, BlockID blockID) {
     // Block/ Chunk Deletion is handled by BlockDeletingService.
-    // SCM sends Block Deletion commands directly to Datanodes and not
-    // through a Pipeline.
+    // SCM sends Block Deletion commands directly to Datanodes and not through a Pipeline.
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public List<BlockData> listBlock(Container container, long startLocalID, int
-      count) throws IOException {
+  public List<BlockData> listBlock(Container container, long startLocalID, int count) throws IOException {
     Preconditions.checkNotNull(container, "container cannot be null");
-    Preconditions.checkState(startLocalID >= 0 || startLocalID == -1,
-        "startLocal ID cannot be negative");
-    Preconditions.checkArgument(count > 0,
-        "Count must be a positive number.");
+    Preconditions.checkState(startLocalID >= 0 || startLocalID == -1, "startLocal ID cannot be negative");
+    Preconditions.checkArgument(count > 0, "Count must be a positive number.");
     container.readLock();
     try {
-      List<BlockData> result = null;
-      KeyValueContainerData cData =
-          (KeyValueContainerData) container.getContainerData();
+      List<BlockData> result;
+      KeyValueContainerData cData = (KeyValueContainerData) container.getContainerData();
       try (DBHandle db = BlockUtils.getDB(cData, config)) {
         result = new ArrayList<>();
-        String startKey = (startLocalID == -1) ? cData.startKeyEmpty()
+        String startKey = (startLocalID == -1)
+            ? cData.startKeyEmpty()
             : cData.getBlockKey(startLocalID);
-        List<? extends Table.KeyValue<String, BlockData>> range =
-            db.getStore().getBlockDataTable()
-                .getSequentialRangeKVs(startKey, count,
-                    cData.containerPrefix(), cData.getUnprefixedKeyFilter());
+        List<? extends Table.KeyValue<String, BlockData>> range = db.getStore().getBlockDataTable()
+            .getSequentialRangeKVs(startKey, count, cData.containerPrefix(), cData.getUnprefixedKeyFilter());
         for (Table.KeyValue<String, BlockData> entry : range) {
           result.add(db.getStore().getCompleteBlockData(entry.getValue(), null, entry.getKey()));
         }
@@ -369,8 +346,7 @@ public class BlockManagerImpl implements BlockManager {
     BlockUtils.shutdownCache(config);
   }
 
-  private BlockData getBlockByID(DBHandle db, BlockID blockID,
-      KeyValueContainerData containerData) throws IOException {
+  private BlockData getBlockByID(DBHandle db, BlockID blockID, KeyValueContainerData containerData) throws IOException {
     String blockKey = containerData.getBlockKey(blockID.getLocalID());
     return db.getStore().getBlockByID(blockID, blockKey);
   }

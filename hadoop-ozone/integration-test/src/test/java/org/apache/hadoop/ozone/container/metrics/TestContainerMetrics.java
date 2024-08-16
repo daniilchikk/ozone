@@ -85,6 +85,7 @@ import org.junit.jupiter.api.io.TempDir;
 @Timeout(300)
 public class TestContainerMetrics {
   static final String TEST_DIR = GenericTestUtils.getRandomizedTempPath() + File.separator;
+
   @TempDir
   private Path tempDir;
   private static final OzoneConfiguration CONF = new OzoneConfiguration();
@@ -93,8 +94,7 @@ public class TestContainerMetrics {
   @BeforeAll
   public static void setup() {
     DefaultMetricsSystem.setMiniClusterMode(true);
-    CONF.setInt(DFSConfigKeysLegacy.DFS_METRICS_PERCENTILES_INTERVALS_KEY,
-        DFS_METRICS_PERCENTILES_INTERVALS);
+    CONF.setInt(DFSConfigKeysLegacy.DFS_METRICS_PERCENTILES_INTERVALS_KEY, DFS_METRICS_PERCENTILES_INTERVALS);
     CONF.setBoolean(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATASTREAM_ENABLED, false);
     CONF.set(OzoneConfigKeys.OZONE_METADATA_DIRS, TEST_DIR);
 
@@ -110,18 +110,18 @@ public class TestContainerMetrics {
   }
 
   @AfterEach
-  public void cleanUp() throws IOException {
+  public void cleanUp() {
     FileUtils.deleteQuietly(new File(CONF.get(ScmConfigKeys.HDDS_DATANODE_DIR_KEY)));
-    FileUtils.deleteQuietly(CONF.get(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR) == null ?
-        null : new File(CONF.get(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR)));
+    FileUtils.deleteQuietly(CONF.get(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR) == null
+        ? null
+        : new File(CONF.get(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR)));
   }
 
   @Test
   public void testContainerMetrics() throws Exception {
     runTestClientServer(pipeline -> CONF
             .setInt(OzoneConfigKeys.HDDS_CONTAINER_IPC_PORT,
-                pipeline.getFirstNode()
-                    .getPort(DatanodeDetails.Port.Name.STANDALONE).getValue()),
+                pipeline.getFirstNode().getPort(DatanodeDetails.Port.Name.STANDALONE).getValue()),
         pipeline -> new XceiverClientGrpc(pipeline, CONF),
         (dn, volumeSet) -> new XceiverServerGrpc(dn, CONF,
             createDispatcher(dn, volumeSet), null), (dn, p) -> {
@@ -140,48 +140,44 @@ public class TestContainerMetrics {
   private static MutableVolumeSet createVolumeSet(DatanodeDetails dn, String path) throws IOException {
     CONF.set(ScmConfigKeys.HDDS_DATANODE_DIR_KEY, path);
     return new MutableVolumeSet(
-        dn.getUuidString(), CONF,
-        null, StorageVolume.VolumeType.DATA_VOLUME, null);
+        dn.getUuidString(),
+        CONF,
+        null,
+        StorageVolume.VolumeType.DATA_VOLUME,
+        null);
   }
 
   private HddsDispatcher createDispatcher(DatanodeDetails dd, VolumeSet volumeSet) {
     ContainerSet containerSet = new ContainerSet(1000);
-    StateContext context = ContainerTestUtils.getMockContext(
-        dd, CONF);
+    StateContext context = ContainerTestUtils.getMockContext(dd, CONF);
     ContainerMetrics metrics = ContainerMetrics.create(CONF);
     Map<ContainerProtos.ContainerType, Handler> handlers = Maps.newHashMap();
-    for (ContainerProtos.ContainerType containerType :
-        ContainerProtos.ContainerType.values()) {
+    for (ContainerProtos.ContainerType containerType : ContainerProtos.ContainerType.values()) {
       handlers.put(containerType,
           Handler.getHandlerForContainerType(containerType, CONF,
               context.getParent().getDatanodeDetails().getUuidString(),
               containerSet, volumeSet, metrics,
               c -> { }));
     }
-    HddsDispatcher dispatcher = new HddsDispatcher(CONF, containerSet,
-        volumeSet, handlers, context, metrics, null);
+    HddsDispatcher dispatcher = new HddsDispatcher(CONF, containerSet, handlers, context, metrics, null);
     StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList())
         .forEach(hddsVolume -> hddsVolume.setDbParentDir(tempDir.toFile()));
     dispatcher.setClusterId(UUID.randomUUID().toString());
     return dispatcher;
   }
 
-  static void runTestClientServer(
-      CheckedConsumer<Pipeline, IOException> initConf,
-      CheckedFunction<Pipeline, XceiverClientSpi,
-                IOException> createClient,
-      CheckedBiFunction<DatanodeDetails, MutableVolumeSet, XceiverServerSpi,
-          IOException> createServer,
-      CheckedBiConsumer<DatanodeDetails, Pipeline, IOException> initServer)
-      throws Exception {
+  static void runTestClientServer(CheckedConsumer<Pipeline, IOException> initConf,
+      CheckedFunction<Pipeline, XceiverClientSpi, IOException> createClient,
+      CheckedBiFunction<DatanodeDetails, MutableVolumeSet, XceiverServerSpi, IOException> createServer,
+      CheckedBiConsumer<DatanodeDetails, Pipeline, IOException> initServer) throws Exception {
+
     XceiverServerSpi server = null;
     XceiverClientSpi client = null;
     long containerID = ContainerTestHelper.getTestContainerID();
     MutableVolumeSet volumeSet = null;
 
     try {
-      final Pipeline pipeline =
-          MockPipeline.createSingleNodePipeline();
+      final Pipeline pipeline = MockPipeline.createSingleNodePipeline();
       initConf.accept(pipeline);
 
       DatanodeDetails dn = pipeline.getFirstNode();
@@ -196,21 +192,17 @@ public class TestContainerMetrics {
       // Write Chunk
       BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
       final ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-          ContainerTestHelper.getWriteChunkRequest(
-              pipeline, blockID, 1024);
+          ContainerTestHelper.getWriteChunkRequest(pipeline, blockID, 1024);
       ContainerCommandResponseProto response = client.sendCommand(writeChunkRequest);
-      assertEquals(ContainerProtos.Result.SUCCESS,
-          response.getResult());
+      assertEquals(ContainerProtos.Result.SUCCESS, response.getResult());
 
       //Read Chunk
       final ContainerProtos.ContainerCommandRequestProto readChunkRequest =
-          ContainerTestHelper.getReadChunkRequest(pipeline, writeChunkRequest
-              .getWriteChunk());
+          ContainerTestHelper.getReadChunkRequest(pipeline, writeChunkRequest.getWriteChunk());
       response = client.sendCommand(readChunkRequest);
       assertEquals(ContainerProtos.Result.SUCCESS, response.getResult());
 
-      MetricsRecordBuilder containerMetrics = getMetrics(
-          "StorageContainerMetrics");
+      MetricsRecordBuilder containerMetrics = getMetrics("StorageContainerMetrics");
       assertCounter("NumOps", 3L, containerMetrics);
       assertCounter("numCreateContainer", 1L, containerMetrics);
       assertCounter("numWriteChunk", 1L, containerMetrics);
@@ -222,11 +214,9 @@ public class TestContainerMetrics {
       Thread.sleep((DFS_METRICS_PERCENTILES_INTERVALS + 1) * 1000);
       assertQuantileGauges("WriteChunkNanos" + sec, containerMetrics);
 
-      List<HddsVolume> volumes =
-          StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList());
+      List<HddsVolume> volumes = StorageVolumeUtil.getHddsVolumesList(volumeSet.getVolumesList());
       HddsVolume hddsVolume = volumes.get(0);
-      MetricsRecordBuilder volumeIOMetrics =
-          getMetrics(hddsVolume.getVolumeIOStats().getMetricsSourceName());
+      MetricsRecordBuilder volumeIOMetrics = getMetrics(hddsVolume.getVolumeIOStats().getMetricsSourceName());
       assertCounter("ReadBytes", 1024L, volumeIOMetrics);
       assertCounter("ReadOpCount", 1L, volumeIOMetrics);
       assertCounter("WriteBytes", 1024L, volumeIOMetrics);
@@ -247,14 +237,17 @@ public class TestContainerMetrics {
 
   private XceiverServerSpi newXceiverServerRatis(DatanodeDetails dn, MutableVolumeSet volumeSet)
       throws IOException {
-    CONF.setInt(OzoneConfigKeys.HDDS_CONTAINER_RATIS_IPC_PORT,
-        dn.getPort(DatanodeDetails.Port.Name.RATIS).getValue());
+    CONF.setInt(OzoneConfigKeys.HDDS_CONTAINER_RATIS_IPC_PORT, dn.getPort(DatanodeDetails.Port.Name.RATIS).getValue());
     final String dir = TEST_DIR + dn.getUuid();
     CONF.set(OzoneConfigKeys.HDDS_CONTAINER_RATIS_DATANODE_STORAGE_DIR, dir);
-    final ContainerDispatcher dispatcher = createDispatcher(dn,
-        volumeSet);
-    return XceiverServerRatis.newXceiverServerRatis(null, dn, CONF, dispatcher,
+    final ContainerDispatcher dispatcher = createDispatcher(dn, volumeSet);
+    return XceiverServerRatis.newXceiverServerRatis(
+        null,
+        dn,
+        CONF,
+        dispatcher,
         new ContainerController(new ContainerSet(1000), Maps.newHashMap()),
-        null, null);
+        null,
+        null);
   }
 }

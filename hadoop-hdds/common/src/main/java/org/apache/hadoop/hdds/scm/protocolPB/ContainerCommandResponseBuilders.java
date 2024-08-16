@@ -44,6 +44,7 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunk
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
 import org.apache.hadoop.ozone.common.ChunkBuffer;
+import org.apache.hadoop.ozone.common.utils.BufferUtils;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.ratis.thirdparty.com.google.protobuf.UnsafeByteOperations;
 
@@ -55,15 +56,15 @@ import static org.apache.hadoop.hdds.scm.utils.ClientCommandsUtils.getReadChunkV
 public final class ContainerCommandResponseBuilders {
 
   /**
-   * Returns a Container Command Response Builder with the specified result
-   * and message.
-   * @param request requestProto message.
+   * Returns a Container Command Response Builder with the specified result and message.
+   *
+   * @param request request message.
    * @param result result of the command.
    * @param message response message.
    * @return ContainerCommand Response Builder.
    */
-  public static Builder getContainerCommandResponse(
-      ContainerCommandRequestProto request, Result result, String message) {
+  public static Builder getContainerCommandResponse(ContainerCommandRequestProto request, Result result,
+      String message) {
 
     return ContainerCommandResponseProto.newBuilder()
         .setCmdType(request.getCmdType())
@@ -73,15 +74,14 @@ public final class ContainerCommandResponseBuilders {
   }
 
   /**
-   * Returns a Container Command Response Builder. This call is used to build
-   * success responses. Calling function can add other fields to the response
-   * as required.
-   * @param request requestProto message.
-   * @return ContainerCommand Response Builder with result as SUCCESS.
+   * Returns a Container Command Response Builder.
+   * This call is used to build success responses.
+   * Calling function can add other fields to the response as required.
+   *
+   * @param request request message.
+   * @return ContainerCommand Response Builder with a result as {@link Result#SUCCESS}.
    */
-  public static Builder getSuccessResponseBuilder(
-      ContainerCommandRequestProto request) {
-
+  public static Builder getSuccessResponseBuilder(ContainerCommandRequestProto request) {
     return ContainerCommandResponseProto.newBuilder()
         .setCmdType(request.getCmdType())
         .setTraceID(request.getTraceID())
@@ -89,68 +89,65 @@ public final class ContainerCommandResponseBuilders {
   }
 
   /**
-   * Returns a Container Command Response. This call is used for creating null
-   * success responses.
-   * @param request requestProto message.
-   * @return ContainerCommand Response with result as SUCCESS.
+   * Returns a Container Command Response. This call is used for creating {@code null} success responses.
+   *
+   * @param request request message.
+   * @return ContainerCommand Response with a result as {@link Result#SUCCESS}.
    */
-  public static ContainerCommandResponseProto getSuccessResponse(
-      ContainerCommandRequestProto request) {
-
+  public static ContainerCommandResponseProto getSuccessResponse(ContainerCommandRequestProto request) {
     return getSuccessResponseBuilder(request)
         .setMessage("")
         .build();
   }
 
   /**
-   * We found a command type but no associated payload for the command. Hence
-   * return malformed Command as response.
+   * We found a command type but no associated payload for the command.
+   * Hence, return malformed Command as response.
    *
    * @param request - Protobuf message.
-   * @return ContainerCommandResponseProto - MALFORMED_REQUEST.
+   * @return ContainerCommand Response with a result as {@link Result#MALFORMED_REQUEST}.
    */
-  public static ContainerCommandResponseProto malformedRequest(
-      ContainerCommandRequestProto request) {
-
-    return getContainerCommandResponse(request, Result.MALFORMED_REQUEST,
-        "Cmd type does not match the payload.")
+  public static ContainerCommandResponseProto malformedRequest(ContainerCommandRequestProto request) {
+    return getContainerCommandResponse(request, Result.MALFORMED_REQUEST, "Cmd type does not match the payload.")
         .build();
   }
 
   /**
-   * We found a command type that is not supported yet.
+   * We found a command type not supported yet.
    *
    * @param request - Protobuf message.
-   * @return ContainerCommandResponseProto - UNSUPPORTED_REQUEST.
+   * @return ContainerCommand Response with a result as {@link Result#UNSUPPORTED_REQUEST}.
    */
-  public static ContainerCommandResponseProto unsupportedRequest(
-      ContainerCommandRequestProto request) {
-
-    return getContainerCommandResponse(request, Result.UNSUPPORTED_REQUEST,
-        "Server does not support this command yet.")
+  public static ContainerCommandResponseProto unsupportedRequest(ContainerCommandRequestProto request) {
+    return getContainerCommandResponse(request, Result.UNSUPPORTED_REQUEST, "Server does not support this command yet.")
         .build();
   }
 
   /**
-   * Returns putBlock response success.
+   * Returns successful putBlock response.
+   *
    * @param msg - Request.
-   * @return Response.
+   * @return Successful PutBlock response.
    */
-  public static ContainerCommandResponseProto putBlockResponseSuccess(
-      ContainerCommandRequestProto msg, BlockData blockData) {
+  public static ContainerCommandResponseProto putBlockResponseSuccess(ContainerCommandRequestProto msg,
+      BlockData blockData) {
 
     PutBlockResponseProto.Builder putBlock = PutBlockResponseProto.newBuilder()
-        .setCommittedBlockLength(getCommittedBlockLengthResponseBuilder(
-            blockData.getSize(), blockData.getBlockID()));
+        .setCommittedBlockLength(getCommittedBlockLengthResponseBuilder(blockData.getSize(), blockData.getBlockID()));
 
     return getSuccessResponseBuilder(msg)
         .setPutBlock(putBlock)
         .build();
   }
 
-  public static ContainerCommandResponseProto getBlockDataResponse(
-      ContainerCommandRequestProto msg, BlockData data) {
-
+  /**
+   * Generates a successful response containing block data for the given request.
+   *
+   * @param msg The request message.
+   * @param data The block data to be included in the response.
+   * @return A ContainerCommandResponseProto object containing the block data.
+   */
+  public static ContainerCommandResponseProto getBlockDataResponse(ContainerCommandRequestProto msg, BlockData data) {
     GetBlockResponseProto.Builder getBlock = GetBlockResponseProto.newBuilder()
         .setBlockData(data);
 
@@ -159,35 +156,49 @@ public final class ContainerCommandResponseBuilders {
         .build();
   }
 
-  public static ContainerCommandResponseProto getListBlockResponse(
-      ContainerCommandRequestProto msg, List<BlockData> data) {
+  /**
+   * Generates a response containing a list of block data for the given request.
+   *
+   * @param msg The request message.
+   * @param data The list of block data to be included in the response.
+   * @return A ContainerCommandResponseProto object containing the list of block data.
+   */
+  public static ContainerCommandResponseProto getListBlockResponse(ContainerCommandRequestProto msg,
+      List<BlockData> data) {
 
-    ListBlockResponseProto.Builder builder =
-        ListBlockResponseProto.newBuilder();
+    ListBlockResponseProto.Builder builder = ListBlockResponseProto.newBuilder();
     builder.addAllBlockData(data);
     return getSuccessResponseBuilder(msg)
         .setListBlock(builder)
         .build();
   }
+
   /**
-   * Returns successful getCommittedBlockLength Response.
-   * @param msg - Request.
-   * @return Response.
+   * Generates a response based on the provided request message and block length.
+   *
+   * @param msg The request message of type ContainerCommandRequestProto.
+   * @param blockLength The length of the block to be included in the response.
+   * @return A ContainerCommandResponseProto object containing the block length information.
    */
-  public static ContainerCommandResponseProto getBlockLengthResponse(
-      ContainerCommandRequestProto msg, long blockLength) {
+  public static ContainerCommandResponseProto getBlockLengthResponse(ContainerCommandRequestProto msg,
+      long blockLength) {
 
     GetCommittedBlockLengthResponseProto.Builder committedBlockLength =
-        getCommittedBlockLengthResponseBuilder(blockLength,
-            msg.getGetCommittedBlockLength().getBlockID());
+        getCommittedBlockLengthResponseBuilder(blockLength, msg.getGetCommittedBlockLength().getBlockID());
 
     return getSuccessResponseBuilder(msg)
         .setGetCommittedBlockLength(committedBlockLength)
         .build();
   }
 
-  public static GetCommittedBlockLengthResponseProto.Builder
-      getCommittedBlockLengthResponseBuilder(long blockLength,
+  /**
+   * Constructs a GetCommittedBlockLengthResponseProto.Builder with the specified block length and block ID.
+   *
+   * @param blockLength The length of the block to be included in the response.
+   * @param blockID The ID of the block to be included in the response.
+   * @return The GetCommittedBlockLengthResponseProto.Builder object containing the block length and block ID.
+   */
+  public static GetCommittedBlockLengthResponseProto.Builder getCommittedBlockLengthResponseBuilder(long blockLength,
       DatanodeBlockID blockID) {
 
     return GetCommittedBlockLengthResponseProto.newBuilder()
@@ -196,17 +207,18 @@ public final class ContainerCommandResponseBuilders {
   }
 
   /**
-   * Gets a response for the putSmallFile RPC.
-   * @param msg - ContainerCommandRequestProto
-   * @return - ContainerCommandResponseProto
+   * Generates a successful response for the PutSmallFile operation.
+   *
+   * @param msg The request message containing the PutSmallFile command.
+   * @param blockData The block data associated with the PutSmallFile operation.
+   * @return A ContainerCommandResponseProto object indicating the success of the PutSmallFile operation
+   *    and containing relevant response data.
    */
-  public static ContainerCommandResponseProto getPutFileResponseSuccess(
-      ContainerCommandRequestProto msg, BlockData blockData) {
+  public static ContainerCommandResponseProto getPutFileResponseSuccess(ContainerCommandRequestProto msg,
+      BlockData blockData) {
 
-    PutSmallFileResponseProto.Builder putSmallFile =
-        PutSmallFileResponseProto.newBuilder()
-            .setCommittedBlockLength(getCommittedBlockLengthResponseBuilder(
-                blockData.getSize(), blockData.getBlockID()));
+    PutSmallFileResponseProto.Builder putSmallFile = PutSmallFileResponseProto.newBuilder()
+        .setCommittedBlockLength(getCommittedBlockLengthResponseBuilder(blockData.getSize(), blockData.getBlockID()));
 
     return getSuccessResponseBuilder(msg)
         .setCmdType(Type.PutSmallFile)
@@ -215,21 +227,22 @@ public final class ContainerCommandResponseBuilders {
   }
 
   /**
-   * Gets a response for the WriteChunk RPC.
-   * @param msg - ContainerCommandRequestProto
-   * @return - ContainerCommandResponseProto
+   * Generates a successful response for a WriteChunk operation.
+   *
+   * @param msg The request message containing the WriteChunk command.
+   * @param blockData The block data associated with the WriteChunk operation.
+   * @return A ContainerCommandResponseProto object indicating the success of the WriteChunk operation
+   *     and containing relevant response data.
    */
-  public static ContainerCommandResponseProto getWriteChunkResponseSuccess(
-      ContainerCommandRequestProto msg, BlockData blockData) {
+  public static ContainerCommandResponseProto getWriteChunkResponseSuccess(ContainerCommandRequestProto msg,
+      BlockData blockData) {
 
-    WriteChunkResponseProto.Builder writeChunk =
-        WriteChunkResponseProto.newBuilder();
+    WriteChunkResponseProto.Builder writeChunk = WriteChunkResponseProto.newBuilder();
     if (blockData != null) {
-      writeChunk.setCommittedBlockLength(
-          getCommittedBlockLengthResponseBuilder(
-              blockData.getSize(), blockData.getBlockID()));
-
+      writeChunk
+          .setCommittedBlockLength(getCommittedBlockLengthResponseBuilder(blockData.getSize(), blockData.getBlockID()));
     }
+
     return getSuccessResponseBuilder(msg)
         .setCmdType(Type.WriteChunk)
         .setWriteChunk(writeChunk)
@@ -237,29 +250,27 @@ public final class ContainerCommandResponseBuilders {
   }
 
   /**
-   * Gets a response to the read small file call.
-   * @param request - Msg
-   * @param dataBuffers  - Data
-   * @param info  - Info
-   * @return    Response.
+   * Generates a successful response for the GetSmallFile operation.
+   *
+   * @param request The request message containing the GetSmallFile command.
+   * @param dataBuffers A list of ByteString objects containing the data buffers for the small file.
+   * @param info The ChunkInfo object containing metadata about the chunk.
+   * @return A ContainerCommandResponseProto object indicating the success of the GetSmallFile operation
+   *     and containing relevant response data.
    */
-  public static ContainerCommandResponseProto getGetSmallFileResponseSuccess(
-      ContainerCommandRequestProto request, List<ByteString> dataBuffers,
-      ChunkInfo info) {
+  public static ContainerCommandResponseProto getGetSmallFileResponseSuccess(ContainerCommandRequestProto request,
+      List<ByteString> dataBuffers, ChunkInfo info) {
 
     Preconditions.checkNotNull(request);
 
-    boolean isReadChunkV0 = getReadChunkVersion(request.getGetSmallFile())
-        .equals(ContainerProtos.ReadChunkVersion.V0);
+    boolean isReadChunkV0 = getReadChunkVersion(request.getGetSmallFile()).equals(ContainerProtos.ReadChunkVersion.V0);
 
     ReadChunkResponseProto.Builder readChunk;
 
     if (isReadChunkV0) {
       // V0 has all response data in a single ByteBuffer
-      ByteString combinedData = ByteString.EMPTY;
-      for (ByteString buffer : dataBuffers) {
-        combinedData = combinedData.concat(buffer);
-      }
+      ByteString combinedData = BufferUtils.concatByteStrings(dataBuffers);
+
       readChunk = ReadChunkResponseProto.newBuilder()
           .setChunkData(info)
           .setData(combinedData)
@@ -274,41 +285,46 @@ public final class ContainerCommandResponseBuilders {
           .setBlockID(request.getGetSmallFile().getBlock().getBlockID());
     }
 
-    GetSmallFileResponseProto.Builder getSmallFile =
-        GetSmallFileResponseProto.newBuilder().setData(readChunk);
+    GetSmallFileResponseProto.Builder getSmallFile = GetSmallFileResponseProto.newBuilder().setData(readChunk);
 
     return getSuccessResponseBuilder(request)
         .setCmdType(Type.GetSmallFile)
         .setGetSmallFile(getSmallFile)
         .build();
   }
+
   /**
-   * Returns a ReadContainer Response.
+   * Generates a response containing the requested container data.
    *
-   * @param request Request
-   * @param containerData - data
-   * @return Response.
+   * @param request The request message of type ContainerCommandRequestProto.
+   * @param containerData The container data to be included in the response.
+   * @return A ContainerCommandResponseProto object with the container data.
    */
-  public static ContainerCommandResponseProto getReadContainerResponse(
-      ContainerCommandRequestProto request, ContainerDataProto containerData) {
+  public static ContainerCommandResponseProto getReadContainerResponse(ContainerCommandRequestProto request,
+      ContainerDataProto containerData) {
 
     Preconditions.checkNotNull(containerData);
 
-    ReadContainerResponseProto.Builder response =
-        ReadContainerResponseProto.newBuilder()
-            .setContainerData(containerData);
+    ReadContainerResponseProto.Builder response = ReadContainerResponseProto.newBuilder()
+        .setContainerData(containerData);
 
     return getSuccessResponseBuilder(request)
         .setReadContainer(response)
         .build();
   }
 
-  public static ContainerCommandResponseProto getReadChunkResponse(
-      ContainerCommandRequestProto request, ChunkBuffer data,
-      Function<ByteBuffer, ByteString> byteBufferToByteString) {
+  /**
+   * Generates a response for a ReadChunk request, containing the requested chunk data.
+   *
+   * @param request The ContainerCommandRequestProto object containing the ReadChunk request.
+   * @param data The ChunkBuffer containing the data to be included in the response.
+   * @param byteBufferToByteString Function to convert ByteBuffer objects to ByteString.
+   * @return A ContainerCommandResponseProto object containing the response data.
+   */
+  public static ContainerCommandResponseProto getReadChunkResponse(ContainerCommandRequestProto request,
+      ChunkBuffer data, Function<ByteBuffer, ByteString> byteBufferToByteString) {
 
-    boolean isReadChunkV0 = getReadChunkVersion(request.getReadChunk())
-        .equals(ContainerProtos.ReadChunkVersion.V0);
+    boolean isReadChunkV0 = getReadChunkVersion(request.getReadChunk()).equals(ContainerProtos.ReadChunkVersion.V0);
 
     ReadChunkResponseProto.Builder response;
 
@@ -333,8 +349,16 @@ public final class ContainerCommandResponseBuilders {
         .build();
   }
 
-  public static ContainerCommandResponseProto getFinalizeBlockResponse(
-      ContainerCommandRequestProto msg, BlockData data) {
+  /**
+   * Generates a successful response for the FinalizeBlock operation.
+   *
+   * @param msg The request message containing the FinalizeBlock command.
+   * @param data The block data associated with the FinalizeBlock operation.
+   * @return A ContainerCommandResponseProto object indicating the success of the FinalizeBlock operation
+   * and containing relevant response data.
+   */
+  public static ContainerCommandResponseProto getFinalizeBlockResponse(ContainerCommandRequestProto msg,
+      BlockData data) {
 
     ContainerProtos.FinalizeBlockResponseProto.Builder blockData =
         ContainerProtos.FinalizeBlockResponseProto.newBuilder()
@@ -345,9 +369,15 @@ public final class ContainerCommandResponseBuilders {
         .build();
   }
 
-  public static ContainerCommandResponseProto getEchoResponse(
-      ContainerCommandRequestProto msg) {
-
+  /**
+   * Generates an echo response based on the provided request message.
+   * The response contains a random payload of the specified size and optionally simulates a delay before responding.
+   *
+   * @param msg The request message of type ContainerCommandRequestProto,
+   *     containing the EchoRequest with payload size and optional sleep time.
+   * @return A ContainerCommandResponseProto object containing the echo response with a random payload.
+   */
+  public static ContainerCommandResponseProto getEchoResponse(ContainerCommandRequestProto msg) {
     ContainerProtos.EchoRequestProto echoRequest = msg.getEcho();
     int responsePayload = echoRequest.getPayloadSizeResp();
 
@@ -360,10 +390,9 @@ public final class ContainerCommandResponseBuilders {
       throw new RuntimeException(e);
     }
 
-    ContainerProtos.EchoResponseProto.Builder echo =
-        ContainerProtos.EchoResponseProto
-            .newBuilder()
-            .setPayload(UnsafeByteOperations.unsafeWrap(RandomUtils.nextBytes(responsePayload)));
+    ContainerProtos.EchoResponseProto.Builder echo = ContainerProtos.EchoResponseProto
+        .newBuilder()
+        .setPayload(UnsafeByteOperations.unsafeWrap(RandomUtils.nextBytes(responsePayload)));
 
     return getSuccessResponseBuilder(msg)
         .setEcho(echo)

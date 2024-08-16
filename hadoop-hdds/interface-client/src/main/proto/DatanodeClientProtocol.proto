@@ -33,21 +33,20 @@ package hadoop.hdds.datanode;
 /**
  * Commands that are used to manipulate the state of containers on a datanode.
  *
- * These commands allow us to work against the datanode - from
- * StorageContainer Manager as well as clients.
+ * These commands allow us to work against the datanode - from StorageContainer Manager as well as clients.
  *
- *  1. CreateContainer - This call is usually made by Storage Container
- *     manager, when we need to create a new container on a given datanode.
+ *  1. CreateContainer - This call is usually made by Storage Container manager,
+ *     when we need to create a new container on a given datanode.
  *
- *  2. ReadContainer - Allows end user to stat a container. For example
- *     this allows us to return the metadata of a container.
+ *  2. ReadContainer - Allows end user to stat a container.
+ *     For example this allows us to return the metadata of a container.
  *
  *  3. UpdateContainer - Updates a container metadata.
-
+ *
  *  4. DeleteContainer - This call is made to delete a container.
  *
- *  5. ListContainer - Returns the list of containers on this
- *     datanode. This will be used by tests and tools.
+ *  5. ListContainer - Returns the list of containers on this datanode.
+ *     This will be used by tests and tools.
  *
  *  6. PutBlock - Given a valid container, creates a block.
  *
@@ -55,8 +54,7 @@ package hadoop.hdds.datanode;
  *
  *  8. DeleteBlock - Deletes a given block.
  *
- *  9. ListBlock - Returns a list of blocks that are present inside
- *      a given container.
+ *  9. ListBlock - Returns a list of blocks that are present inside a given container.
  *
  *  10. ReadChunk - Allows us to read a chunk.
  *
@@ -172,7 +170,6 @@ message DatanodeBlockID {
   required int64 localID = 2;
   optional uint64 blockCommitSequenceId = 3 [default = 0];
   optional int32 replicaIndex = 4;
-
 }
 
 message KeyValue {
@@ -183,17 +180,16 @@ message KeyValue {
 message ContainerCommandRequestProto {
   required   Type cmdType = 1; // Type of the command
 
-  // A string that identifies this command, we generate  Trace ID in Ozone
-  // frontend and this allows us to trace that command all over ozone.
+  // A string that identifies this command, we generate Trace ID in Ozone frontend
+  // and this allows us to trace that command all over ozone.
   optional   string traceID = 2;
 
   required   int64 containerID = 3;
   required   string datanodeUuid = 4;
   optional   string pipelineID = 5;
 
-  // One of the following command is available when the corresponding
-  // cmdType is set. At the protocol level we allow only
-  // one command in each packet.
+  // One of the following command is available when the corresponding cmdType is set.
+  // At the protocol level we allow only one command in each packet.
   // TODO : Upgrade to Protobuf 2.6 or later.
   optional   CreateContainerRequestProto createContainer = 6;
   optional   ReadContainerRequestProto readContainer = 7;
@@ -264,7 +260,7 @@ message ContainerDataProto {
   enum State {
     OPEN = 1;
     CLOSING = 2;
-    QUASI_CLOSED =3;
+    QUASI_CLOSED = 3;
     CLOSED = 4;
     UNHEALTHY = 5;
     INVALID = 6;
@@ -282,14 +278,13 @@ message ContainerDataProto {
 }
 
 message Container2BCSIDMapProto {
-   // repeated Container2BCSIDMapEntryProto container2BCSID = 1;
-    map <int64, int64> container2BCSID = 1;
+  // repeated Container2BCSIDMapEntryProto container2BCSID = 1;
+  map <int64, int64> container2BCSID = 1;
 }
 
 enum ContainerType {
   KeyValueContainer = 1;
 }
-
 
 // Container Messages.
 message  CreateContainerRequestProto {
@@ -374,7 +369,6 @@ message  GetBlockResponseProto  {
   required BlockData blockData = 1;
 }
 
-
 message  DeleteBlockRequestProto {
   required DatanodeBlockID blockID = 1;
 }
@@ -394,7 +388,6 @@ message   DeleteBlockResponseProto {
 message  ListBlockRequestProto {
   optional int64 startLocalID = 2;
   required uint32 count = 3;
-
 }
 
 message  ListBlockResponseProto {
@@ -419,12 +412,12 @@ message ChunkInfo {
   required uint64 offset = 2;
   required uint64 len = 3;
   repeated KeyValue metadata = 4;
-  required ChecksumData checksumData =5;
+  required ChecksumData checksumData = 5;
   optional bytes stripeChecksum = 6;
 }
 
 message ChunkInfoList {
-    repeated ChunkInfo chunks = 1;
+  repeated ChunkInfo chunks = 1;
 }
 
 message ChecksumData {
@@ -434,11 +427,11 @@ message ChecksumData {
 }
 
 enum ChecksumType {
-    NONE = 1;
-    CRC32 = 2;
-    CRC32C = 3;
-    SHA256 = 4;
-    MD5 = 5;
+  NONE = 1;
+  CRC32 = 2;
+  CRC32C = 3;
+  SHA256 = 4;
+  MD5 = 5;
 }
 
 message  WriteChunkRequestProto  {
@@ -495,8 +488,7 @@ message  ListChunkResponseProto {
   repeated ChunkInfo chunkData = 1;
 }
 
-/** For small file access combines write chunk and putBlock into a single
-RPC */
+// For small file access combines write chunk and putBlock into a single RPC
 
 message PutSmallFileRequestProto {
   required PutBlockRequestProto block = 1;
@@ -570,8 +562,7 @@ message VerifyBlockResponseProto {
 service XceiverClientProtocolService {
   // A client-to-datanode RPC to send container commands
   rpc send(stream ContainerCommandRequestProto) returns
-    (stream ContainerCommandResponseProto) {};
-
+      (stream ContainerCommandResponseProto) {};
 }
 
 service IntraDatanodeProtocolService {

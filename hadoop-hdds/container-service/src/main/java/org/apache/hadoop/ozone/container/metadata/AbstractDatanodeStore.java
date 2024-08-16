@@ -49,8 +49,8 @@ import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_DB_PROFILE;
 import static org.apache.hadoop.hdds.utils.db.DBStoreBuilder.HDDS_DEFAULT_DB_PROFILE;
 
 /**
- * Implementation of the {@link DatanodeStore} interface that contains
- * functionality common to all more derived datanode store implementations.
+ * Implementation of the {@link DatanodeStore} interface
+ * that contains functionality common to all more derived datanode store implementations.
  */
 public abstract class AbstractDatanodeStore implements DatanodeStore {
 
@@ -66,8 +66,7 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
 
   private Table<String, Long> finalizeBlocksTableWithIterator;
 
-  public static final Logger LOG =
-      LoggerFactory.getLogger(AbstractDatanodeStore.class);
+  public static final Logger LOG = LoggerFactory.getLogger(AbstractDatanodeStore.class);
   private volatile DBStore store;
   private final AbstractDatanodeDBDefinition dbDef;
   private final ManagedColumnFamilyOptions cfOptions;
@@ -81,16 +80,14 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
    * @param config - Ozone Configuration.
    * @throws IOException - on Failure.
    */
-  protected AbstractDatanodeStore(ConfigurationSource config,
-      AbstractDatanodeDBDefinition dbDef, boolean openReadOnly)
+  protected AbstractDatanodeStore(ConfigurationSource config, AbstractDatanodeDBDefinition dbDef, boolean openReadOnly)
       throws IOException {
 
-    dbProfile = DatanodeDBProfile
-        .getProfile(config.getEnum(HDDS_DB_PROFILE, HDDS_DEFAULT_DB_PROFILE));
+    dbProfile = DatanodeDBProfile.getProfile(config.getEnum(HDDS_DB_PROFILE, HDDS_DEFAULT_DB_PROFILE));
 
-    // The same config instance is used on each datanode, so we can share the
-    // corresponding column family options, providing a single shared cache
-    // for all containers on a datanode.
+    // The same config instance is used on each datanode,
+    // so we can share the corresponding column family options,
+    // providing a single shared cache for all containers on a datanode.
     cfOptions = dbProfile.getColumnFamilyOptions(config);
 
     this.dbDef = dbDef;
@@ -99,40 +96,34 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
   }
 
   @Override
-  public void start(ConfigurationSource config)
-      throws IOException {
+  public void start(ConfigurationSource config) throws IOException {
     if (this.store == null) {
       ManagedDBOptions options = dbProfile.getDBOptions();
       options.setCreateIfMissing(true);
       options.setCreateMissingColumnFamilies(true);
 
-      if (this.dbDef instanceof DatanodeSchemaOneDBDefinition ||
-          this.dbDef instanceof DatanodeSchemaTwoDBDefinition) {
+      if (this.dbDef instanceof DatanodeSchemaOneDBDefinition || this.dbDef instanceof DatanodeSchemaTwoDBDefinition) {
         long maxWalSize = DBProfile.toLong(StorageUnit.MB.toBytes(2));
         options.setMaxTotalWalSize(maxWalSize);
       }
 
-      DatanodeConfiguration dc =
-          config.getObject(DatanodeConfiguration.class);
+      DatanodeConfiguration dc = config.getObject(DatanodeConfiguration.class);
       // Config user log files
-      InfoLogLevel level = InfoLogLevel.valueOf(
-          dc.getRocksdbLogLevel() + "_LEVEL");
+      InfoLogLevel level = InfoLogLevel.valueOf(dc.getRocksdbLogLevel() + "_LEVEL");
       options.setInfoLogLevel(level);
       options.setMaxLogFileSize(dc.getRocksdbLogMaxFileSize());
       options.setKeepLogFileNum(dc.getRocksdbLogMaxFileNum());
       
       if (this.dbDef instanceof DatanodeSchemaThreeDBDefinition) {
-        options.setDeleteObsoleteFilesPeriodMicros(
-            dc.getRocksdbDeleteObsoleteFilesPeriod());
+        options.setDeleteObsoleteFilesPeriodMicros(dc.getRocksdbDeleteObsoleteFilesPeriod());
 
-        // For V3, all Rocksdb dir has the same "container.db" name. So use
-        // parentDirName(storage UUID)-dbDirName as db metrics name
+        // For V3, all Rocksdb dir has the same "container.db" name.
+        // So use parentDirName(storage UUID)-dbDirName as db metrics name
         this.store = DBStoreBuilder.newBuilder(config, dbDef)
             .setDBOptions(options)
             .setDefaultCFOptions(cfOptions)
             .setOpenReadOnly(openReadOnly)
-            .setDBJmxBeanNameName(dbDef.getDBLocation(config).getName() + "-" +
-                dbDef.getName())
+            .setDBJmxBeanNameName(dbDef.getDBLocation(config).getName() + "-" + dbDef.getName())
             .build();
       } else {
         this.store = DBStoreBuilder.newBuilder(config, dbDef)
@@ -142,35 +133,28 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
             .build();
       }
 
-      // Use the DatanodeTable wrapper to disable the table iterator on
-      // existing Table implementations retrieved from the DBDefinition.
-      // See the DatanodeTable's Javadoc for an explanation of why this is
-      // necessary.
-      metadataTable = new DatanodeTable<>(
-              dbDef.getMetadataColumnFamily().getTable(this.store));
+      // Use the DatanodeTable wrapper
+      // to disable the table iterator on existing Table implementations retrieved from the DBDefinition.
+      // See the DatanodeTable's Javadoc for an explanation of why this is necessary.
+      metadataTable = new DatanodeTable<>(dbDef.getMetadataColumnFamily().getTable(this.store));
       checkTableStatus(metadataTable, metadataTable.getName());
 
-      // The block iterator this class returns will need to use the table
-      // iterator internally, so construct a block data table instance
-      // that does not have the iterator disabled by DatanodeTable.
-      blockDataTableWithIterator =
-              dbDef.getBlockDataColumnFamily().getTable(this.store);
+      // The block iterator this class returns will need to use the table iterator internally,
+      // so construct a block data table instance that does not have the iterator disabled by DatanodeTable.
+      blockDataTableWithIterator = dbDef.getBlockDataColumnFamily().getTable(this.store);
 
       blockDataTable = new DatanodeTable<>(blockDataTableWithIterator);
       checkTableStatus(blockDataTable, blockDataTable.getName());
 
       if (dbDef.getFinalizeBlocksColumnFamily() != null) {
-        finalizeBlocksTableWithIterator =
-            dbDef.getFinalizeBlocksColumnFamily().getTable(this.store);
+        finalizeBlocksTableWithIterator = dbDef.getFinalizeBlocksColumnFamily().getTable(this.store);
 
-        finalizeBlocksTable = new DatanodeTable<>(
-            finalizeBlocksTableWithIterator);
+        finalizeBlocksTable = new DatanodeTable<>(finalizeBlocksTableWithIterator);
         checkTableStatus(finalizeBlocksTable, finalizeBlocksTable.getName());
       }
 
       if (dbDef.getLastChunkInfoColumnFamily() != null) {
-        lastChunkInfoTable = new DatanodeTable<>(
-            dbDef.getLastChunkInfoColumnFamily().getTable(this.store));
+        lastChunkInfoTable = new DatanodeTable<>(dbDef.getLastChunkInfoColumnFamily().getTable(this.store));
         checkTableStatus(lastChunkInfoTable, lastChunkInfoTable.getName());
       }
     }
@@ -222,22 +206,19 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
   @Override
   public BlockIterator<BlockData> getBlockIterator(long containerID)
       throws IOException {
-    return new KeyValueBlockIterator(containerID,
-        blockDataTableWithIterator.iterator());
+    return new KeyValueBlockIterator(containerID, blockDataTableWithIterator.iterator());
   }
 
   @Override
   public BlockIterator<BlockData> getBlockIterator(long containerID,
       KeyPrefixFilter filter) throws IOException {
-    return new KeyValueBlockIterator(containerID,
-        blockDataTableWithIterator.iterator(), filter);
+    return new KeyValueBlockIterator(containerID, blockDataTableWithIterator.iterator(), filter);
   }
 
   @Override
   public BlockIterator<Long> getFinalizeBlockIterator(long containerID,
       KeyPrefixFilter filter) throws IOException {
-    return new KeyValueBlockLocalIdIterator(containerID,
-        finalizeBlocksTableWithIterator.iterator(), filter);
+    return new KeyValueBlockLocalIdIterator(containerID, finalizeBlocksTableWithIterator.iterator(), filter);
   }
 
   @Override
@@ -286,47 +267,36 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
     return this.finalizeBlocksTableWithIterator;
   }
 
-  protected static void checkTableStatus(Table<?, ?> table, String name)
-          throws IOException {
-    String logMessage = "Unable to get a reference to %s table. Cannot " +
-            "continue.";
-    String errMsg = "Inconsistent DB state, Table - %s. Please check the" +
-            " logs for more info.";
+  protected static void checkTableStatus(Table<?, ?> table, String name) throws IOException {
     if (table == null) {
-      LOG.error(String.format(logMessage, name));
-      throw new IOException(String.format(errMsg, name));
+      LOG.error("Unable to get a reference to {}} table. Cannot continue.", name);
+      throw new IOException("Inconsistent DB state, Table - " + name + ". Please check the logs for more info.");
     }
   }
 
   /**
-   * Block Iterator for KeyValue Container. This block iterator returns blocks
-   * which match with the {@link org.apache.hadoop.hdds.utils.MetadataKeyFilters.KeyPrefixFilter}. If no
-   * filter is specified, then default filter used is
-   * {@link org.apache.hadoop.hdds.utils.MetadataKeyFilters#getUnprefixedKeyFilter()}
+   * Block Iterator for KeyValue Container.
+   * This block iterator returns blocks which match with the {@link MetadataKeyFilters.KeyPrefixFilter}.
+   * If no filter is specified, then the default filter used is {@link MetadataKeyFilters#getUnprefixedKeyFilter()}
    */
   @InterfaceAudience.Public
-  public static class KeyValueBlockIterator implements
-          BlockIterator<BlockData>, Closeable {
+  public static class KeyValueBlockIterator implements BlockIterator<BlockData>, Closeable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(
-            KeyValueBlockIterator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(KeyValueBlockIterator.class);
 
-    private final TableIterator<String, ? extends Table.KeyValue<String,
-            BlockData>>
-            blockIterator;
-    private static final KeyPrefixFilter DEFAULT_BLOCK_FILTER =
-            MetadataKeyFilters.getUnprefixedKeyFilter();
+    private final TableIterator<String, ? extends Table.KeyValue<String, BlockData>> blockIterator;
+    private static final KeyPrefixFilter DEFAULT_BLOCK_FILTER = MetadataKeyFilters.getUnprefixedKeyFilter();
     private final KeyPrefixFilter blockFilter;
     private BlockData nextBlock;
     private final long containerID;
 
     /**
      * KeyValueBlockIterator to iterate unprefixed blocks in a container.
+     *
      * @param iterator - The underlying iterator to apply the block filter to.
      */
     KeyValueBlockIterator(long containerID,
-            TableIterator<String, ? extends Table.KeyValue<String, BlockData>>
-                    iterator) {
+        TableIterator<String, ? extends Table.KeyValue<String, BlockData>> iterator) {
       this.containerID = containerID;
       this.blockIterator = iterator;
       this.blockFilter = DEFAULT_BLOCK_FILTER;
@@ -334,12 +304,12 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
 
     /**
      * KeyValueBlockIterator to iterate blocks in a container.
+     *
      * @param iterator - The underlying iterator to apply the block filter to.
      * @param filter - Block filter, filter to be applied for blocks
      */
-    KeyValueBlockIterator(long containerID,
-            TableIterator<String, ? extends Table.KeyValue<String, BlockData>>
-                    iterator, KeyPrefixFilter filter) {
+    KeyValueBlockIterator(long containerID, TableIterator<String, ? extends Table.KeyValue<String, BlockData>> iterator,
+        KeyPrefixFilter filter) {
       this.containerID = containerID;
       this.blockIterator = iterator;
       this.blockFilter = filter;
@@ -347,8 +317,8 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
 
     /**
      * This method returns blocks matching with the filter.
+     *
      * @return next block or null if no more blocks
-     * @throws IOException
      */
     @Override
     public BlockData nextBlock() throws IOException, NoSuchElementException {
@@ -360,8 +330,7 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
       if (hasNext()) {
         return nextBlock();
       }
-      throw new NoSuchElementException("Block Iterator reached end for " +
-              "ContainerID " + containerID);
+      throw new NoSuchElementException("Block Iterator reached end for ContainerID " + containerID);
     }
 
     @Override
@@ -374,10 +343,10 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
         byte[] keyBytes = StringUtils.string2Bytes(keyValue.getKey());
         if (blockFilter.filterKey(null, keyBytes, null)) {
           nextBlock = keyValue.getValue();
-          if (LOG.isTraceEnabled()) {
-            LOG.trace("Block matching with filter found: blockID is : {} for " +
-                    "containerID {}", nextBlock.getLocalID(), containerID);
-          }
+          LOG.trace(
+              "Block matching with filter found: blockID is : {} for containerID {}",
+              nextBlock.getLocalID(),
+              containerID);
           return true;
         }
       }
@@ -404,32 +373,27 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
 
   /**
    * Block localId Iterator for KeyValue Container.
-   * This Block localId iterator returns localIds
-   * which match with the {@link org.apache.hadoop.hdds.utils.MetadataKeyFilters.KeyPrefixFilter}. If no
-   * filter is specified, then default filter used is
-   * {@link org.apache.hadoop.hdds.utils.MetadataKeyFilters#getUnprefixedKeyFilter()}
+   * This Block localId iterator returns localIds which match with the {@link MetadataKeyFilters.KeyPrefixFilter}.
+   * If no filter is specified, then default filter used is {@link MetadataKeyFilters#getUnprefixedKeyFilter()}
    */
   @InterfaceAudience.Public
-  public static class KeyValueBlockLocalIdIterator implements
-      BlockIterator<Long>, Closeable {
+  public static class KeyValueBlockLocalIdIterator implements BlockIterator<Long>, Closeable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(
-        KeyValueBlockLocalIdIterator.class);
+    private static final Logger LOG = LoggerFactory.getLogger(KeyValueBlockLocalIdIterator.class);
 
-    private final TableIterator<String, ? extends Table.KeyValue<String,
-        Long>> blockLocalIdIterator;
+    private final TableIterator<String, ? extends Table.KeyValue<String, Long>> blockLocalIdIterator;
     private final KeyPrefixFilter localIdFilter;
     private Long nextLocalId;
     private final long containerID;
 
     /**
      * KeyValueBlockLocalIdIterator to iterate block localIds in a container.
+     *
      * @param iterator - The iterator to apply the blockLocalId filter to.
      * @param filter - BlockLocalId filter to be applied for block localIds.
      */
     KeyValueBlockLocalIdIterator(long containerID,
-        TableIterator<String, ? extends Table.KeyValue<String, Long>>
-        iterator, KeyPrefixFilter filter) {
+        TableIterator<String, ? extends Table.KeyValue<String, Long>> iterator, KeyPrefixFilter filter) {
       this.containerID = containerID;
       this.blockLocalIdIterator = iterator;
       this.localIdFilter = filter;
@@ -437,8 +401,8 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
 
     /**
      * This method returns blocks matching with the filter.
+     *
      * @return next block local Id or null if no more block localIds
-     * @throws IOException
      */
     @Override
     public Long nextBlock() throws IOException, NoSuchElementException {
@@ -450,8 +414,7 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
       if (hasNext()) {
         return nextBlock();
       }
-      throw new NoSuchElementException("Block Local ID Iterator " +
-          "reached end for ContainerID " + containerID);
+      throw new NoSuchElementException("Block Local ID Iterator reached end for ContainerID " + containerID);
     }
 
     @Override
@@ -464,10 +427,7 @@ public abstract class AbstractDatanodeStore implements DatanodeStore {
         byte[] keyBytes = StringUtils.string2Bytes(keyValue.getKey());
         if (localIdFilter.filterKey(null, keyBytes, null)) {
           nextLocalId = keyValue.getValue();
-          if (LOG.isTraceEnabled()) {
-            LOG.trace("Block matching with filter found: LocalID is : " +
-                "{} for containerID {}", nextLocalId, containerID);
-          }
+          LOG.trace("Block matching with filter found: LocalID is : {} for containerID {}", nextLocalId, containerID);
           return true;
         }
       }

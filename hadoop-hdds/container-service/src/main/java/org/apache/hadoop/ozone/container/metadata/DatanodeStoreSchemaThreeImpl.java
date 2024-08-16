@@ -45,15 +45,18 @@ import java.util.Map;
 import static org.apache.hadoop.ozone.container.metadata.DatanodeSchemaThreeDBDefinition.getContainerKeyPrefix;
 
 /**
- * Constructs a datanode store in accordance with schema version 3, which uses
- * three column families/tables:
- * 1. A block data table.
- * 2. A metadata table.
- * 3. A Delete Transaction Table.
+ * Constructs a datanode store in accordance with schema version 3, which uses three column families/tables:
+ * <ol>
+ * <li>A block data table.
+ * <li>A metadata table.
+ * <li>A Delete Transaction Table.
+ * </ol>
  *
  * This is different from schema version 2 from these points:
- * - All keys have containerID as prefix.
- * - The table 3 has String as key instead of Long since we want to use prefix.
+ * <ul>
+ * <li>All keys have containerID as prefix.
+ * <li>The table 3 has String as key instead of Long since we want to use prefix.
+ * </ul>
  */
 public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalChunkList
     implements DeleteTransactionStore<String> {
@@ -63,10 +66,9 @@ public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalCh
 
   private final Table<String, DeletedBlocksTransaction> deleteTransactionTable;
 
-  public DatanodeStoreSchemaThreeImpl(ConfigurationSource config,
-      String dbPath, boolean openReadOnly) throws IOException {
-    super(config, new DatanodeSchemaThreeDBDefinition(dbPath, config),
-        openReadOnly);
+  public DatanodeStoreSchemaThreeImpl(ConfigurationSource config, String dbPath, boolean openReadOnly)
+      throws IOException {
+    super(config, new DatanodeSchemaThreeDBDefinition(dbPath, config), openReadOnly);
     this.deleteTransactionTable = ((DatanodeSchemaThreeDBDefinition) getDbDef())
         .getDeleteTransactionsColumnFamily().getTable(getStore());
   }
@@ -77,30 +79,27 @@ public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalCh
   }
 
   @Override
-  public BlockIterator<BlockData> getBlockIterator(long containerID)
+  public BlockIterator<BlockData> getBlockIterator(long containerID) throws IOException {
+    // Here we need to filter the keys with containerID as prefix and followed by metadata prefixes such as #deleting#.
+    return new KeyValueBlockIterator(
+        containerID,
+        getBlockDataTableWithIterator().iterator(getContainerKeyPrefix(containerID)),
+        new MetadataKeyFilters.KeyPrefixFilter()
+            .addFilter(getContainerKeyPrefix(containerID) + "#", true));
+  }
+
+  @Override
+  public BlockIterator<BlockData> getBlockIterator(long containerID, MetadataKeyFilters.KeyPrefixFilter filter)
       throws IOException {
-    // Here we need to filter the keys with containerID as prefix
-    // and followed by metadata prefixes such as #deleting#.
-    return new KeyValueBlockIterator(containerID,
-        getBlockDataTableWithIterator()
-            .iterator(getContainerKeyPrefix(containerID)),
-        new MetadataKeyFilters.KeyPrefixFilter().addFilter(
-            getContainerKeyPrefix(containerID) + "#", true));
+    return new KeyValueBlockIterator(containerID, getBlockDataTableWithIterator()
+        .iterator(getContainerKeyPrefix(containerID)), filter);
   }
 
   @Override
-  public BlockIterator<BlockData> getBlockIterator(long containerID,
-      MetadataKeyFilters.KeyPrefixFilter filter) throws IOException {
-    return new KeyValueBlockIterator(containerID,
-        getBlockDataTableWithIterator()
-            .iterator(getContainerKeyPrefix(containerID)), filter);
-  }
-
-  @Override
-  public BlockIterator<Long> getFinalizeBlockIterator(long containerID,
-      MetadataKeyFilters.KeyPrefixFilter filter) throws IOException {
-    return new KeyValueBlockLocalIdIterator(containerID,
-        getFinalizeBlocksTableWithIterator().iterator(getContainerKeyPrefix(containerID)), filter);
+  public BlockIterator<Long> getFinalizeBlockIterator(long containerID, MetadataKeyFilters.KeyPrefixFilter filter)
+      throws IOException {
+    return new KeyValueBlockLocalIdIterator(containerID, getFinalizeBlocksTableWithIterator()
+        .iterator(getContainerKeyPrefix(containerID)), filter);
   }
 
   public void removeKVContainerData(long containerID) throws IOException {
@@ -116,52 +115,68 @@ public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalCh
     }
   }
 
-  public void dumpKVContainerData(long containerID, File dumpDir)
-      throws IOException {
+  /**
+   * Dumps key-value container data for the specified container ID into the given directory.
+   *
+   * @param containerID the identifier of the container whose data will be dumped
+   * @param dumpDir the directory where the dumped data files will be stored
+   * @throws IOException if an I/O error occurs during the dumping process
+   */
+  public void dumpKVContainerData(long containerID, File dumpDir) throws IOException {
     String prefix = getContainerKeyPrefix(containerID);
-    getMetadataTable().dumpToFileWithPrefix(
-        getTableDumpFile(getMetadataTable(), dumpDir), prefix);
-    getBlockDataTable().dumpToFileWithPrefix(
-        getTableDumpFile(getBlockDataTable(), dumpDir), prefix);
+    getMetadataTable().dumpToFileWithPrefix(getTableDumpFile(getMetadataTable(), dumpDir), prefix);
+    getBlockDataTable().dumpToFileWithPrefix(getTableDumpFile(getBlockDataTable(), dumpDir), prefix);
     if (VersionedDatanodeFeatures.isFinalized(HDDSLayoutFeature.HBASE_SUPPORT)) {
-      getLastChunkInfoTable().dumpToFileWithPrefix(
-          getTableDumpFile(getLastChunkInfoTable(), dumpDir), prefix);
+      getLastChunkInfoTable().dumpToFileWithPrefix(getTableDumpFile(getLastChunkInfoTable(), dumpDir), prefix);
     }
-    getDeleteTransactionTable().dumpToFileWithPrefix(
-        getTableDumpFile(getDeleteTransactionTable(), dumpDir),
-        prefix);
+    getDeleteTransactionTable().dumpToFileWithPrefix(getTableDumpFile(getDeleteTransactionTable(), dumpDir), prefix);
   }
 
-  public void loadKVContainerData(File dumpDir)
-      throws IOException {
-    getMetadataTable().loadFromFile(
-        getTableDumpFile(getMetadataTable(), dumpDir));
-    getBlockDataTable().loadFromFile(
-        getTableDumpFile(getBlockDataTable(), dumpDir));
+  /**
+   * Loads key-value container data from the specified directory.
+   * This method loads data for the metadata, block data,
+   * and deletes transaction tables from files in the provided directory.
+   *
+   * @param dumpDir Directory containing the dump files for the tables.
+   * @throws IOException If an I/O error occurs while loading data from the files.
+   */
+  public void loadKVContainerData(File dumpDir) throws IOException {
+    getMetadataTable().loadFromFile(getTableDumpFile(getMetadataTable(), dumpDir));
+    getBlockDataTable().loadFromFile(getTableDumpFile(getBlockDataTable(), dumpDir));
     if (VersionedDatanodeFeatures.isFinalized(HDDSLayoutFeature.HBASE_SUPPORT)) {
-      getLastChunkInfoTable().loadFromFile(
-          getTableDumpFile(getLastChunkInfoTable(), dumpDir));
+      getLastChunkInfoTable().loadFromFile(getTableDumpFile(getLastChunkInfoTable(), dumpDir));
     }
-    getDeleteTransactionTable().loadFromFile(
-        getTableDumpFile(getDeleteTransactionTable(), dumpDir));
+    getDeleteTransactionTable().loadFromFile(getTableDumpFile(getDeleteTransactionTable(), dumpDir));
   }
 
-  public static File getTableDumpFile(Table<String, ?> table,
-      File dumpDir) throws IOException {
+  /**
+   * Constructs a file object representing the location for the table dump file within the specified directory.
+   *
+   * @param table the table for which the dump file is being created
+   * @param dumpDir the directory where the dump file will be located
+   * @return the file object representing the dump file for the provided table
+   * @throws IOException if an I/O error occurs when creating the file object
+   */
+  public static File getTableDumpFile(Table<String, ?> table, File dumpDir) throws IOException {
     return new File(dumpDir, table.getName() + DUMP_FILE_SUFFIX);
   }
 
+  /**
+   * Constructs a file object representing the directory for dumping data within the specified metadata directory.
+   *
+   * @param metaDir the metadata directory where the dump directory will be created
+   * @return the file object representing the dump directory
+   */
   public static File getDumpDir(File metaDir) {
     return new File(metaDir, DUMP_DIR);
   }
 
+  @Override
   public void compactionIfNeeded() throws Exception {
-    // Calculate number of files per level and size per level
+    // Calculate the number of files per level and size per level
     RocksDatabase rocksDB = ((RDBStore)getStore()).getDb();
-    List<LiveFileMetaData> liveFileMetaDataList =
-        rocksDB.getLiveFilesMetaData();
-    DatanodeConfiguration df =
-        getDbDef().getConfig().getObject(DatanodeConfiguration.class);
+    List<LiveFileMetaData> liveFileMetaDataList = rocksDB.getLiveFilesMetaData();
+    DatanodeConfiguration df = getDbDef().getConfig().getObject(DatanodeConfiguration.class);
     int numThreshold = df.getAutoCompactionSmallSstFileNum();
     long sizeThreshold = df.getAutoCompactionSmallSstFileSize();
     Map<String, Map<Integer, List<LiveFileMetaData>>> stat = new HashMap<>();
@@ -182,10 +197,8 @@ public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalCh
       });
     }
 
-    for (Map.Entry<String, Map<Integer, List<LiveFileMetaData>>> entry :
-        stat.entrySet()) {
-      for (Map.Entry<Integer, List<LiveFileMetaData>> innerEntry:
-          entry.getValue().entrySet()) {
+    for (Map.Entry<String, Map<Integer, List<LiveFileMetaData>>> entry : stat.entrySet()) {
+      for (Map.Entry<Integer, List<LiveFileMetaData>> innerEntry: entry.getValue().entrySet()) {
         if (innerEntry.getValue().size() > numThreshold) {
           ColumnFamily columnFamily = null;
           // Find CF Handler
@@ -200,32 +213,32 @@ public class DatanodeStoreSchemaThreeImpl extends DatanodeStoreWithIncrementalCh
             long startCId = Long.MAX_VALUE;
             long endCId = Long.MIN_VALUE;
             for (LiveFileMetaData file: innerEntry.getValue()) {
-              long firstCId = DatanodeSchemaThreeDBDefinition.getContainerId(
-                  FixedLengthStringCodec.bytes2String(file.smallestKey()));
-              long lastCId = DatanodeSchemaThreeDBDefinition.getContainerId(
-                  FixedLengthStringCodec.bytes2String(file.largestKey()));
+              long firstCId =
+                  DatanodeSchemaThreeDBDefinition
+                      .getContainerId(FixedLengthStringCodec.bytes2String(file.smallestKey()));
+              long lastCId =
+                  DatanodeSchemaThreeDBDefinition
+                      .getContainerId(FixedLengthStringCodec.bytes2String(file.largestKey()));
               startCId = Math.min(firstCId, startCId);
               endCId = Math.max(lastCId, endCId);
             }
 
             // Do the range compaction
-            ManagedCompactRangeOptions options =
-                new ManagedCompactRangeOptions();
-            options.setBottommostLevelCompaction(
-                ManagedCompactRangeOptions.BottommostLevelCompaction.kForce);
-            LOG.info("CF {} level {} small file number {} exceeds threshold {}"
-                    + ". Auto compact small sst files.", entry.getKey(),
-                innerEntry.getKey(), innerEntry.getValue().size(),
+            ManagedCompactRangeOptions options = new ManagedCompactRangeOptions();
+            options.setBottommostLevelCompaction(ManagedCompactRangeOptions.BottommostLevelCompaction.kForce);
+            LOG.info(
+                "CF {} level {} small file number {} exceeds threshold {}. Auto compact small sst files.",
+                entry.getKey(),
+                innerEntry.getKey(),
+                innerEntry.getValue().size(),
                 numThreshold);
-            rocksDB.compactRange(columnFamily,
-                DatanodeSchemaThreeDBDefinition
-                    .getContainerKeyPrefixBytes(startCId),
-                DatanodeSchemaThreeDBDefinition
-                    .getContainerKeyPrefixBytes(endCId + 1),
+            rocksDB.compactRange(
+                columnFamily,
+                DatanodeSchemaThreeDBDefinition.getContainerKeyPrefixBytes(startCId),
+                DatanodeSchemaThreeDBDefinition.getContainerKeyPrefixBytes(endCId + 1),
                 options);
           } else {
-            LOG.warn("Failed to find cf {} in DB {}", entry.getKey(),
-                getDbDef().getClass());
+            LOG.warn("Failed to find cf {} in DB {}", entry.getKey(), getDbDef().getClass());
           }
         }
       }

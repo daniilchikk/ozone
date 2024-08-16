@@ -63,9 +63,8 @@ import static org.apache.hadoop.ozone.OzoneConsts.PENDING_DELETE_BLOCK_COUNT;
 import static org.apache.hadoop.ozone.container.metadata.DatanodeSchemaThreeDBDefinition.getContainerKeyPrefix;
 
 /**
- * This class represents the KeyValueContainer metadata, which is the
- * in-memory representation of container metadata and is represented on disk
- * by the .container file.
+ * This class represents the KeyValueContainer metadata,
+ * which is the in-memory representation of container metadata and is represented on disk by the .container file.
  */
 public class KeyValueContainerData extends ContainerData {
 
@@ -78,7 +77,7 @@ public class KeyValueContainerData extends ContainerData {
   // Path to Container metadata Level DB/RocksDB Store and .container file.
   private String metadataPath;
 
-  //Type of DB used to store key to chunks mapping
+  //Type of DB used to store key to chunk mapping
   private String containerDBType = CONTAINER_DB_TYPE_ROCKSDB;
 
   private File dbFile = null;
@@ -108,14 +107,14 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Constructs KeyValueContainerData object.
+   *
    * @param id - ContainerId
    * @param layoutVersion container layout
    * @param size - maximum size of the container in bytes
    */
-  public KeyValueContainerData(long id, ContainerLayoutVersion layoutVersion,
-      long size, String originPipelineId, String originNodeId) {
-    super(ContainerProtos.ContainerType.KeyValueContainer, id, layoutVersion,
-        size, originPipelineId, originNodeId);
+  public KeyValueContainerData(long id, ContainerLayoutVersion layoutVersion, long size, String originPipelineId,
+      String originNodeId) {
+    super(ContainerProtos.ContainerType.KeyValueContainer, id, layoutVersion, size, originPipelineId, originNodeId);
     this.numPendingDeletionBlocks = new AtomicLong(0);
     this.deleteTransactionId = 0;
     finalizedBlockSet =  ConcurrentHashMap.newKeySet();
@@ -123,8 +122,7 @@ public class KeyValueContainerData extends ContainerData {
 
   public KeyValueContainerData(KeyValueContainerData source) {
     super(source);
-    Preconditions.checkArgument(source.getContainerType()
-        == ContainerProtos.ContainerType.KeyValueContainer);
+    Preconditions.checkArgument(source.getContainerType() == ContainerProtos.ContainerType.KeyValueContainer);
     this.numPendingDeletionBlocks = new AtomicLong(0);
     this.deleteTransactionId = 0;
     this.schemaVersion = source.getSchemaVersion();
@@ -132,25 +130,22 @@ public class KeyValueContainerData extends ContainerData {
   }
 
   /**
-   * @param version The schema version indicating the table layout of the
-   * container's database.
+   * @param version The schema version indicating the table layout of the container's database.
    */
   public void setSchemaVersion(String version) {
     schemaVersion = version;
   }
 
   /**
-   * @return The schema version describing the container database's table
-   * layout.
+   * @return The schema version describing the container database's table layout.
    */
   public String getSchemaVersion() {
     return schemaVersion;
   }
 
   /**
-   * Returns schema version or the default value when the
-   * {@link KeyValueContainerData#schemaVersion} is null. The default value can
-   * be referred to {@link KeyValueContainerUtil#isSameSchemaVersion}.
+   * Returns schema version or the default value when the {@link KeyValueContainerData#schemaVersion} is null.
+   * The default value can be referred to {@link KeyValueContainerUtil#isSameSchemaVersion}.
    *
    * @return Schema version as a string.
    * @throws UnsupportedOperationException If no valid schema version is found.
@@ -167,9 +162,7 @@ public class KeyValueContainerData extends ContainerData {
   }
 
   /**
-   * Sets Container dbFile. This should be called only during creation of
-   * KeyValue container.
-   * @param containerDbFile
+   * Sets Container dbFile. This should be called only during the creation of KeyValue container.
    */
   public void setDbFile(File containerDbFile) {
     dbFile = containerDbFile;
@@ -177,6 +170,7 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Returns container DB file.
+   *
    * @return dbFile
    */
   public File getDbFile() {
@@ -185,7 +179,8 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Returns container metadata path.
-   * @return - Physical path where container file and checksum is stored.
+   *
+   * @return - Physical path where container file and checksum are stored.
    */
   public String getMetadataPath() {
     return metadataPath;
@@ -202,6 +197,7 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Returns the path to base dir of the container.
+   *
    * @return Path to base dir
    */
   @Override
@@ -218,7 +214,7 @@ public class KeyValueContainerData extends ContainerData {
   }
 
   /**
-   * updates the blockCommitSequenceId.
+   * Updates the blockCommitSequenceId.
    */
   public void updateBlockCommitSequenceId(long id) {
     this.blockCommitSequenceId = id;
@@ -226,6 +222,7 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Returns the DBType used for the container.
+   *
    * @return containerDBType
    */
   public String getContainerDBType() {
@@ -234,7 +231,6 @@ public class KeyValueContainerData extends ContainerData {
 
   /**
    * Sets the DBType used for the container.
-   * @param containerDBType
    */
   public void setContainerDBType(String containerDBType) {
     this.containerDBType = containerDBType;
@@ -288,17 +284,37 @@ public class KeyValueContainerData extends ContainerData {
     finalizedBlockSet.add(localID);
   }
 
+  /**
+   * Returns a set of finalized block IDs associated with the container data.
+   *
+   * @return a Set of Long values representing the IDs of finalized blocks.
+   */
   public Set<Long> getFinalizedBlockSet() {
     return finalizedBlockSet;
   }
 
+  /**
+   * Checks if a block with the specified local ID exists in the finalized block set.
+   *
+   * @param localID The ID of the block to check for existence in the finalized block set.
+   * @return true if the block exists in the finalized block set, false otherwise.
+   */
   public boolean isFinalizedBlockExist(long localID) {
     return finalizedBlockSet.contains(localID);
   }
 
+  /**
+   * Clears the set of finalized blocks from both memory and the database.
+   * This operation will remove all finalized blocks associated with the current container's prefix.
+   * It first checks if the finalized block set is not empty,
+   * then deletes the corresponding entries from the database using batch operations and clears the in-memory set.
+   *
+   * @param db The database handle to use it for the batch operations. It must not be {@code null}.
+   * @throws IOException If any I/O error occurs during the batch operations.
+   */
   public void clearFinalizedBlock(DBHandle db) throws IOException {
     if (!finalizedBlockSet.isEmpty()) {
-      // delete from db and clear memory
+      // Delete it from db and clear memory.
       // Should never fail.
       Preconditions.checkNotNull(db, "DB cannot be null here");
       try (BatchOperation batch = db.getStore().getBatchHandler().initBatchOperation()) {
@@ -324,10 +340,8 @@ public class KeyValueContainerData extends ContainerData {
     builder.setBlockCount(this.getBlockCount());
 
     for (Map.Entry<String, String> entry : getMetadata().entrySet()) {
-      ContainerProtos.KeyValue.Builder keyValBuilder =
-          ContainerProtos.KeyValue.newBuilder();
-      builder.addMetadata(keyValBuilder.setKey(entry.getKey())
-          .setValue(entry.getValue()).build());
+      ContainerProtos.KeyValue.Builder keyValBuilder = ContainerProtos.KeyValue.newBuilder();
+      builder.addMetadata(keyValBuilder.setKey(entry.getKey()).setValue(entry.getValue()).build());
     }
 
     if (this.getBytesUsed() >= 0) {
@@ -341,35 +355,44 @@ public class KeyValueContainerData extends ContainerData {
     return builder.build();
   }
 
+  /**
+   * Returns an unmodifiable list of YAML field names used in the key-value container.
+   *
+   * @return a List of Strings representing the YAML field names.
+   */
   public static List<String> getYamlFields() {
     return Collections.unmodifiableList(KV_YAML_FIELDS);
   }
 
   /**
    * Update DB counters related to block metadata.
+   *
    * @param db - Reference to container DB.
    * @param batchOperation - Batch Operation to batch DB operations.
    * @param deletedBlockCount - Number of blocks deleted.
    * @param releasedBytes - Number of bytes released.
-   * @throws IOException
    */
-  public void updateAndCommitDBCounters(DBHandle db,
-      BatchOperation batchOperation, int deletedBlockCount,
+  public void updateAndCommitDBCounters(DBHandle db, BatchOperation batchOperation, int deletedBlockCount,
       long releasedBytes) throws IOException {
     Table<String, Long> metadataTable = db.getStore().getMetadataTable();
 
     // Set Bytes used and block count key.
-    metadataTable.putWithBatch(batchOperation, getBytesUsedKey(),
-            getBytesUsed() - releasedBytes);
-    metadataTable.putWithBatch(batchOperation, getBlockCountKey(),
-            getBlockCount() - deletedBlockCount);
-    metadataTable.putWithBatch(batchOperation,
+    metadataTable.putWithBatch(batchOperation, getBytesUsedKey(), getBytesUsed() - releasedBytes);
+    metadataTable.putWithBatch(batchOperation, getBlockCountKey(), getBlockCount() - deletedBlockCount);
+    metadataTable.putWithBatch(
+        batchOperation,
         getPendingDeleteBlockCountKey(),
         getNumPendingDeletionBlocks() - deletedBlockCount);
 
     db.getStore().getBatchHandler().commitBatchOperation(batchOperation);
   }
 
+  /**
+   * Resets the count of pending deletion blocks to zero.
+   *
+   * @param db The database handle used to access the container's metadata table.
+   * @throws IOException If an I/O error occurs while updating the metadata table on disk.
+   */
   public void resetPendingDeleteBlockCount(DBHandle db) throws IOException {
     // Reset the in memory metadata.
     numPendingDeletionBlocks.set(0);
@@ -378,58 +401,116 @@ public class KeyValueContainerData extends ContainerData {
     metadataTable.put(getPendingDeleteBlockCountKey(), 0L);
   }
 
-  // NOTE: Below are some helper functions to format keys according
-  // to container schemas, we should use them instead of using
-  // raw const variables defined.
+  // NOTE: Below are some helper functions to format keys according to container schemas,
+  // we should use them instead of using raw const variables defined.
 
+  /**
+   * Generates a formatted key for accessing block data using the provided local block ID.
+   *
+   * @param localID The local ID of the block within the container.
+   * @return The formatted key string specific to the container's schema.
+   */
   public String getBlockKey(long localID) {
     return formatKey(Long.toString(localID));
   }
 
+  /**
+   * Generates a deleting block key string using the provided local ID.
+   *
+   * @param localID The local ID of the block within the container.
+   * @return The formatted key string specific to the container's schema with the deleting block key prefix.
+   */
   public String getDeletingBlockKey(long localID) {
     return formatKey(DELETING_KEY_PREFIX + localID);
   }
 
+  /**
+   * Generates a formatted key for accessing delete transaction data using the provided transaction ID.
+   *
+   * @param txnID The ID of the transaction to be deleted.
+   * @return The formatted key string specific to the container's schema.
+   */
   public String getDeleteTxnKey(long txnID) {
     return formatKey(Long.toString(txnID));
   }
 
+  /**
+   * Retrieves the formatted key for the latest delete transaction.
+   *
+   * @return A String representing the formatted key for the latest delete transaction.
+   */
   public String getLatestDeleteTxnKey() {
     return formatKey(DELETE_TRANSACTION_KEY);
   }
 
+  /**
+   * Retrieves the formatted key specific to the Block Commit Sequence ID.
+   *
+   * @return A String representing the formatted key for the Block Commit Sequence ID.
+   */
   public String getBcsIdKey() {
     return formatKey(BLOCK_COMMIT_SEQUENCE_ID);
   }
 
+  /**
+   * Retrieves the formatted key specific to the Block Count.
+   *
+   * @return A String representing the formatted key for the Block Count.
+   */
   public String getBlockCountKey() {
     return formatKey(BLOCK_COUNT);
   }
 
+  /**
+   * Retrieves the formatted key specific to the bytes used in the container.
+   * This key is used to store or query the bytes used information from the database specific to the container's schema.
+   *
+   * @return A String representing the formatted key for bytes used.
+   */
   public String getBytesUsedKey() {
     return formatKey(CONTAINER_BYTES_USED);
   }
 
+  /**
+   * Retrieves the formatted key specific to the Pending Delete Block Count.
+   *
+   * @return A String representing the formatted key for the Pending Delete Block Count.
+   */
   public String getPendingDeleteBlockCountKey() {
     return formatKey(PENDING_DELETE_BLOCK_COUNT);
   }
 
+  /**
+   * Retrieves the key prefix used for deleting blocks within the container.
+   *
+   * @return A String representing the formatted key prefix specific to the container's schema for deleting blocks.
+   */
   public String getDeletingBlockKeyPrefix() {
     return formatKey(DELETING_KEY_PREFIX);
   }
 
+  /**
+   * Returns a KeyPrefixFilter that is configured to filter out keys with the container's schema-specific prefix.
+   *
+   * @return a KeyPrefixFilter object that filters out keys using the container's schema-specific prefix.
+   */
   public KeyPrefixFilter getUnprefixedKeyFilter() {
     String schemaPrefix = containerPrefix();
     return new KeyPrefixFilter().addFilter(schemaPrefix + "#", true);
   }
 
+  /**
+   * Generates and returns a {@link KeyPrefixFilter}
+   * configured to filter out keys that have the prefix used for deleting blocks within the container.
+   *
+   * @return a KeyPrefixFilter object configured to filter keys with the deleting block key prefix.
+   */
   public KeyPrefixFilter getDeletingBlockKeyFilter() {
     return new KeyPrefixFilter().addFilter(getDeletingBlockKeyPrefix());
   }
 
   /**
-   * Schema v3 use a prefix as startKey,
-   * for other schemas just return null.
+   * Schema v3 use a prefix as startKey, for other schemas return {@code null}.
    */
   public String startKeyEmpty() {
     if (hasSchema(SCHEMA_V3)) {
@@ -439,8 +520,7 @@ public class KeyValueContainerData extends ContainerData {
   }
 
   /**
-   * Schema v3 use containerID as key prefix,
-   * for other schemas just return null.
+   * Schema v3 use containerID as key prefix, for other schemas {@code null}.
    */
   public String containerPrefix() {
     if (hasSchema(SCHEMA_V3)) {
@@ -450,9 +530,9 @@ public class KeyValueContainerData extends ContainerData {
   }
 
   /**
-   * Format the raw key to a schema specific format key.
-   * Schema v3 use container ID as key prefix,
-   * for other schemas just return the raw key.
+   * Format the raw key to a schema-specific format key.
+   * Schema v3 uses container ID as key prefix, for other schemas return the raw key.
+   *
    * @param key raw key
    * @return formatted key
    */
@@ -463,8 +543,13 @@ public class KeyValueContainerData extends ContainerData {
     return key;
   }
 
+  /**
+   * Checks if the provided version matches the schema version of the container.
+   *
+   * @param version The schema version to compare against the container's schema version.
+   * @return true if the provided version matches the container's schema version, false otherwise.
+   */
   public boolean hasSchema(String version) {
     return KeyValueContainerUtil.isSameSchemaVersion(schemaVersion, version);
   }
-
 }

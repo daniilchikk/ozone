@@ -62,7 +62,6 @@ import org.apache.hadoop.ozone.container.replication.ContainerImporter;
 import org.apache.hadoop.ozone.container.replication.ReplicationServer;
 import org.apache.hadoop.ozone.container.replication.ReplicationServer.ReplicationConfig;
 import org.apache.hadoop.ozone.container.upgrade.VersionedDatanodeFeatures.SchemaV3;
-import org.apache.hadoop.util.DiskChecker.DiskOutOfSpaceException;
 import org.apache.hadoop.util.Timer;
 import org.apache.ratis.grpc.GrpcTlsConfig;
 import org.slf4j.Logger;
@@ -100,9 +99,7 @@ import static org.apache.hadoop.ozone.container.ozoneimpl.ContainerScannerConfig
  * layer.
  */
 public class OzoneContainer {
-
-  private static final Logger LOG = LoggerFactory.getLogger(
-      OzoneContainer.class);
+  private static final Logger LOG = LoggerFactory.getLogger(OzoneContainer.class);
 
   private final HddsDispatcher hddsDispatcher;
   private final Map<ContainerType, Handler> handlers;
@@ -119,13 +116,12 @@ public class OzoneContainer {
   private List<BackgroundContainerDataScanner> dataScanners;
   private List<AbstractBackgroundContainerScanner> backgroundScanners;
   private final BlockDeletingService blockDeletingService;
-  private final StaleRecoveringContainerScrubbingService
-      recoveringContainerScrubbingService;
+  private final StaleRecoveringContainerScrubbingService recoveringContainerScrubbingService;
   private final GrpcTlsConfig tlsClientConfig;
   private final AtomicReference<InitializingStatus> initializingStatus;
   private final ReplicationServer replicationServer;
-  private DatanodeDetails datanodeDetails;
-  private StateContext context;
+  private final DatanodeDetails datanodeDetails;
+  private final StateContext context;
   private ScheduledExecutorService dbCompactionExecutorService;
 
   private final ContainerMetrics metrics;
@@ -135,13 +131,15 @@ public class OzoneContainer {
   }
 
   /**
-   * Construct OzoneContainer object.
+   * Constructs an OzoneContainer instance that manages various services and resources for a datanode.
    *
-   * @param datanodeDetails
-   * @param conf
-   * @param certClient
-   * @throws DiskOutOfSpaceException
-   * @throws IOException
+   * @param hddsDatanodeService Reference to the HddsDatanodeService instance.
+   * @param datanodeDetails Contains details of the datanode such as UUID and hostname.
+   * @param conf Configuration source for reading various settings.
+   * @param context State context containing information about the current state.
+   * @param certClient Certificate client used for handling security certificates.
+   * @param secretKeyClient Client used to verify secret keys.
+   * @throws IOException If an I/O error occurs during initialization.
    */
   public OzoneContainer(HddsDatanodeService hddsDatanodeService,
       DatanodeDetails datanodeDetails, ConfigurationSource conf,
@@ -150,29 +148,34 @@ public class OzoneContainer {
     config = conf;
     this.datanodeDetails = datanodeDetails;
     this.context = context;
-    this.volumeChecker = new StorageVolumeChecker(conf, new Timer(),
-        datanodeDetails.threadNamePrefix());
+    this.volumeChecker = new StorageVolumeChecker(conf, new Timer(), datanodeDetails.threadNamePrefix());
 
-    volumeSet = new MutableVolumeSet(datanodeDetails.getUuidString(), conf,
-        context, VolumeType.DATA_VOLUME, volumeChecker);
+    volumeSet = new MutableVolumeSet(
+        datanodeDetails.getUuidString(),
+        conf,
+        context,
+        VolumeType.DATA_VOLUME,
+        volumeChecker);
     volumeSet.setFailedVolumeListener(this::handleVolumeFailures);
-    metaVolumeSet = new MutableVolumeSet(datanodeDetails.getUuidString(), conf,
-        context, VolumeType.META_VOLUME, volumeChecker);
+    metaVolumeSet = new MutableVolumeSet(
+        datanodeDetails.getUuidString(),
+        conf,
+        context,
+        VolumeType.META_VOLUME,
+        volumeChecker);
 
-    dbVolumeSet = HddsServerUtil.getDatanodeDbDirs(conf).isEmpty() ? null :
-        new MutableVolumeSet(datanodeDetails.getUuidString(), conf,
-            context, VolumeType.DB_VOLUME, volumeChecker);
-    final DatanodeConfiguration dnConf =
-        conf.getObject(DatanodeConfiguration.class);
+    dbVolumeSet = HddsServerUtil.getDatanodeDbDirs(conf).isEmpty()
+        ? null
+        : new MutableVolumeSet(datanodeDetails.getUuidString(), conf, context, VolumeType.DB_VOLUME, volumeChecker);
+    final DatanodeConfiguration dnConf = conf.getObject(DatanodeConfiguration.class);
     if (SchemaV3.isFinalizedAndEnabled(config)) {
-      HddsVolumeUtil.loadAllHddsVolumeDbStore(
-          volumeSet, dbVolumeSet, false, LOG);
+      HddsVolumeUtil.loadAllHddsVolumeDbStore(volumeSet, dbVolumeSet, false, LOG);
       if (dnConf.autoCompactionSmallSstFile()) {
         this.dbCompactionExecutorService = Executors.newScheduledThreadPool(
-                dnConf.getAutoCompactionSmallSstFileThreads(),
-            new ThreadFactoryBuilder().setNameFormat(
-                datanodeDetails.threadNamePrefix() +
-                    "RocksDBCompactionThread-%d").build());
+            dnConf.getAutoCompactionSmallSstFileThreads(),
+            new ThreadFactoryBuilder()
+                .setNameFormat(datanodeDetails.threadNamePrefix() + "RocksDBCompactionThread-%d")
+                .build());
         this.dbCompactionExecutorService.scheduleWithFixedDelay(this::compactDb,
             dnConf.getAutoCompactionSmallSstFileIntervalMinutes(),
             dnConf.getAutoCompactionSmallSstFileIntervalMinutes(),
@@ -212,8 +215,12 @@ public class OzoneContainer {
     }
 
     SecurityConfig secConf = new SecurityConfig(conf);
-    hddsDispatcher = new HddsDispatcher(config, containerSet, volumeSet,
-        handlers, context, metrics,
+    hddsDispatcher = new HddsDispatcher(
+        config,
+        containerSet,
+        handlers,
+        context,
+        metrics,
         TokenVerifier.create(secConf, secretKeyClient));
 
     /*
@@ -223,8 +230,13 @@ public class OzoneContainer {
      */
     controller = new ContainerController(containerSet, handlers);
 
-    writeChannel = XceiverServerRatis.newXceiverServerRatis(hddsDatanodeService,
-        datanodeDetails, config, hddsDispatcher, controller, certClient,
+    writeChannel = XceiverServerRatis.newXceiverServerRatis(
+        hddsDatanodeService,
+        datanodeDetails,
+        config,
+        hddsDispatcher,
+        controller,
+        certClient,
         context);
 
     replicationServer = new ReplicationServer(
@@ -232,22 +244,21 @@ public class OzoneContainer {
         conf.getObject(ReplicationConfig.class),
         secConf,
         certClient,
-        new ContainerImporter(conf, containerSet, controller,
-            volumeSet),
+        new ContainerImporter(conf, containerSet, controller, volumeSet),
         datanodeDetails.threadNamePrefix());
 
-    readChannel = new XceiverServerGrpc(
-        datanodeDetails, config, hddsDispatcher, certClient);
+    readChannel = new XceiverServerGrpc(datanodeDetails, config, hddsDispatcher, certClient);
     Duration blockDeletingSvcInterval = dnConf.getBlockDeletionInterval();
 
-    long blockDeletingServiceTimeout = config
-        .getTimeDuration(OZONE_BLOCK_DELETING_SERVICE_TIMEOUT,
-            OZONE_BLOCK_DELETING_SERVICE_TIMEOUT_DEFAULT,
-            TimeUnit.MILLISECONDS);
+    long blockDeletingServiceTimeout = config.getTimeDuration(
+        OZONE_BLOCK_DELETING_SERVICE_TIMEOUT,
+        OZONE_BLOCK_DELETING_SERVICE_TIMEOUT_DEFAULT,
+        TimeUnit.MILLISECONDS);
 
-    int blockDeletingServiceWorkerSize = config
-        .getInt(OZONE_BLOCK_DELETING_SERVICE_WORKERS,
-            OZONE_BLOCK_DELETING_SERVICE_WORKERS_DEFAULT);
+    int blockDeletingServiceWorkerSize = config.getInt(
+        OZONE_BLOCK_DELETING_SERVICE_WORKERS,
+        OZONE_BLOCK_DELETING_SERVICE_WORKERS_DEFAULT);
+
     blockDeletingService =
         new BlockDeletingService(this, blockDeletingSvcInterval.toMillis(),
             blockDeletingServiceTimeout, TimeUnit.MILLISECONDS,
@@ -255,17 +266,16 @@ public class OzoneContainer {
             datanodeDetails.threadNamePrefix(),
             context.getParent().getReconfigurationHandler());
 
-    Duration recoveringContainerScrubbingSvcInterval =
-        dnConf.getRecoveringContainerScrubInterval();
+    Duration recoveringContainerScrubbingSvcInterval = dnConf.getRecoveringContainerScrubInterval();
 
-    long recoveringContainerScrubbingServiceTimeout = config
-        .getTimeDuration(OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_TIMEOUT,
-            OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_TIMEOUT_DEFAULT,
-            TimeUnit.MILLISECONDS);
+    long recoveringContainerScrubbingServiceTimeout = config.getTimeDuration(
+        OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_TIMEOUT,
+        OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_TIMEOUT_DEFAULT,
+        TimeUnit.MILLISECONDS);
 
-    int recoveringContainerScrubbingServiceWorkerSize = config
-        .getInt(OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_WORKERS,
-            OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_WORKERS_DEFAULT);
+    int recoveringContainerScrubbingServiceWorkerSize = config.getInt(
+        OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_WORKERS,
+        OZONE_RECOVERING_CONTAINER_SCRUBBING_SERVICE_WORKERS_DEFAULT);
 
     recoveringContainerScrubbingService =
         new StaleRecoveringContainerScrubbingService(
@@ -276,44 +286,43 @@ public class OzoneContainer {
             containerSet);
 
     if (certClient != null && secConf.isGrpcTlsEnabled()) {
-      tlsClientConfig = new GrpcTlsConfig(
-          certClient.getKeyManager(),
-          certClient.getTrustManager(), true);
+      tlsClientConfig = new GrpcTlsConfig(certClient.getKeyManager(), certClient.getTrustManager(), true);
     } else {
       tlsClientConfig = null;
     }
 
-    initializingStatus =
-        new AtomicReference<>(InitializingStatus.UNINITIALIZED);
+    initializingStatus = new AtomicReference<>(InitializingStatus.UNINITIALIZED);
   }
 
   /**
    * Shorthand constructor used for testing in non-secure context.
    */
   @VisibleForTesting
-  public OzoneContainer(
-      DatanodeDetails datanodeDetails, ConfigurationSource conf,
-      StateContext context) throws IOException {
+  public OzoneContainer(DatanodeDetails datanodeDetails, ConfigurationSource conf, StateContext context)
+      throws IOException {
     this(null, datanodeDetails, conf, context, null, null);
   }
 
+  /**
+   * Retrieves the TLS (Transport Layer Security) client configuration for the Ozone container.
+   *
+   * @return GrpcTlsConfig instance representing the TLS client configuration.
+   */
   public GrpcTlsConfig getTlsClientConfig() {
     return tlsClientConfig;
   }
 
   /**
-   * Build's container map after volume format.
+   * Build's a container map after volume format.
    */
   @VisibleForTesting
   public void buildContainerSet() {
-    Iterator<StorageVolume> volumeSetIterator = volumeSet.getVolumesList()
-        .iterator();
+    Iterator<StorageVolume> volumeSetIterator = volumeSet.getVolumesList().iterator();
     ArrayList<Thread> volumeThreads = new ArrayList<>();
     long startTime = System.currentTimeMillis();
 
-    // Load container inspectors that may be triggered at startup based on
-    // system properties set. These can inspect and possibly repair
-    // containers as we iterate them here.
+    // Load container inspectors that may be triggered at startup based on system properties set.
+    // These can inspect and possibly repair containers as we iterate them here.
     ContainerInspectorUtil.load();
     String threadNamePrefix = datanodeDetails.threadNamePrefix();
     ThreadFactory threadFactory = new ThreadFactoryBuilder()
@@ -322,39 +331,40 @@ public class OzoneContainer {
         .build();
     while (volumeSetIterator.hasNext()) {
       StorageVolume volume = volumeSetIterator.next();
-      ContainerReader containerReader = new ContainerReader(volumeSet,
-          (HddsVolume) volume, containerSet, config, true);
+      ContainerReader containerReader = new ContainerReader(
+          volumeSet,
+          (HddsVolume) volume,
+          containerSet,
+          config,
+          true);
       Thread thread = threadFactory.newThread(containerReader);
       thread.start();
       volumeThreads.add(thread);
     }
 
     try {
-      for (int i = 0; i < volumeThreads.size(); i++) {
-        volumeThreads.get(i).join();
+      for (Thread volumeThread : volumeThreads) {
+        volumeThread.join();
       }
     } catch (InterruptedException ex) {
       LOG.error("Volume Threads Interrupted exception", ex);
       Thread.currentThread().interrupt();
     }
 
-    // After all containers have been processed, turn off container
-    // inspectors so they are not hit during normal datanode execution.
+    // After all containers have been processed,
+    // turn off container inspectors so they are not hit during normal datanode execution.
     ContainerInspectorUtil.unload();
 
-    LOG.info("Build ContainerSet costs {}s",
-        (System.currentTimeMillis() - startTime) / 1000);
+    LOG.info("Build ContainerSet costs {}s", (System.currentTimeMillis() - startTime) / 1000);
   }
 
   /**
    * Start background daemon thread for performing container integrity checks.
    */
   private void startContainerScrub() {
-    ContainerScannerConfiguration c = config.getObject(
-        ContainerScannerConfiguration.class);
+    ContainerScannerConfiguration c = config.getObject(ContainerScannerConfiguration.class);
     if (!c.isEnabled()) {
-      LOG.info("Scheduled background container scanners and " +
-          "the on-demand container scanner have been disabled.");
+      LOG.info("Scheduled background container scanners and the on-demand container scanner have been disabled.");
       return;
     }
 
@@ -374,14 +384,12 @@ public class OzoneContainer {
 
   private void initContainerScanner(ContainerScannerConfiguration c) {
     if (c.getBandwidthPerVolume() == 0L) {
-      LOG.warn(VOLUME_BYTES_PER_SECOND_KEY + " is set to 0, " +
-          "so background container data scanner will not start.");
+      LOG.warn("{} is set to 0, so background container data scanner will not start.", VOLUME_BYTES_PER_SECOND_KEY);
       return;
     }
     dataScanners = new ArrayList<>();
     for (StorageVolume v : volumeSet.getVolumesList()) {
-      BackgroundContainerDataScanner s =
-          new BackgroundContainerDataScanner(c, controller, (HddsVolume) v);
+      BackgroundContainerDataScanner s = new BackgroundContainerDataScanner(c, controller, (HddsVolume) v);
       s.start();
       dataScanners.add(s);
       backgroundScanners.add(s);
@@ -402,8 +410,7 @@ public class OzoneContainer {
 
   private void initMetadataScanner(ContainerScannerConfiguration c) {
     if (this.metadataScanner == null) {
-      this.metadataScanner =
-          new BackgroundContainerMetadataScanner(c, controller);
+      this.metadataScanner = new BackgroundContainerMetadataScanner(c, controller);
       backgroundScanners.add(metadataScanner);
     }
     this.metadataScanner.start();
@@ -411,8 +418,8 @@ public class OzoneContainer {
 
   private void initOnDemandContainerScanner(ContainerScannerConfiguration c) {
     if (c.getOnDemandBandwidthPerVolume() == 0L) {
-      LOG.warn(ON_DEMAND_VOLUME_BYTES_PER_SECOND_KEY + " is set to 0, " +
-          "so the on-demand container data scanner will not start.");
+      LOG.warn("{} is set to 0, so the on-demand container data scanner will not start.",
+          ON_DEMAND_VOLUME_BYTES_PER_SECOND_KEY);
       return;
     }
     OnDemandContainerDataScanner.init(c, controller);
@@ -449,17 +456,14 @@ public class OzoneContainer {
 
   /**
    * Starts serving requests to ozone container.
-   *
-   * @throws IOException
    */
   public void start(String clusterId) throws IOException {
-    // If SCM HA is enabled, OzoneContainer#start() will be called multi-times
-    // from VersionEndpointTask. The first call should do the initializing job,
+    // If SCM HA is enabled, OzoneContainer#start() will be called multi-times from VersionEndpointTask.
+    // The first call should do the initializing job,
     // the successive calls should wait until OzoneContainer is initialized.
-    if (!initializingStatus.compareAndSet(
-        InitializingStatus.UNINITIALIZED, InitializingStatus.INITIALIZING)) {
+    if (!initializingStatus.compareAndSet(InitializingStatus.UNINITIALIZED, InitializingStatus.INITIALIZING)) {
 
-      // wait OzoneContainer to finish its initializing.
+      // Wait OzoneContainer to finish its initializing.
       while (initializingStatus.get() != InitializingStatus.INITIALIZED) {
         try {
           Thread.sleep(1);
@@ -473,11 +477,9 @@ public class OzoneContainer {
 
     buildContainerSet();
 
-    // Start background volume checks, which will begin after the configured
-    // delay.
+    // Start background volume checks, which will begin after the configured delay.
     volumeChecker.start();
-    // Do an immediate check of all volumes to ensure datanode health before
-    // proceeding.
+    // Do an immediate check of all volumes to ensure datanode health before proceeding.
     volumeSet.checkAllVolumes();
     metaVolumeSet.checkAllVolumes();
     // DB volume set may be null if dedicated DB volumes are not used.
@@ -531,12 +533,21 @@ public class OzoneContainer {
     ContainerMetrics.remove();
   }
 
+  /**
+   * Handles volume failures by delegating the task to the container set.
+   * If the containerSet instance is not null, it invokes its handleVolumeFailures method with the current context.
+   */
   public void handleVolumeFailures() {
     if (containerSet != null) {
       containerSet.handleVolumeFailures(context);
     }
   }
 
+  /**
+   * Retrieves the container set managed by this OzoneContainer.
+   *
+   * @return The ContainerSet instance associated with this OzoneContainer.
+   */
   @VisibleForTesting
   public ContainerSet getContainerSet() {
     return containerSet;
@@ -549,20 +560,34 @@ public class OzoneContainer {
    */
 
   public PipelineReportsProto getPipelineReport() {
-    PipelineReportsProto.Builder pipelineReportsProto =
-        PipelineReportsProto.newBuilder();
+    PipelineReportsProto.Builder pipelineReportsProto = PipelineReportsProto.newBuilder();
     pipelineReportsProto.addAllPipelineReport(writeChannel.getPipelineReport());
     return pipelineReportsProto.build();
   }
 
+  /**
+   * Retrieves the write channel used by this OzoneContainer.
+   *
+   * @return An instance of XceiverServerSpi representing the writing channel for this container.
+   */
   public XceiverServerSpi getWriteChannel() {
     return writeChannel;
   }
 
+  /**
+   * Retrieves the read channel used by this OzoneContainer.
+   *
+   * @return An instance of XceiverServerSpi representing the reading channel for this container.
+   */
   public XceiverServerSpi getReadChannel() {
     return readChannel;
   }
 
+  /**
+   * Retrieves the container controller that manages various container operations.
+   *
+   * @return ContainerController instance associated with this OzoneContainer.
+   */
   public ContainerController getController() {
     return controller;
   }
@@ -570,61 +595,93 @@ public class OzoneContainer {
   /**
    * Returns node report of container storage usage.
    */
-  public StorageContainerDatanodeProtocolProtos.NodeReportProto getNodeReport()
-          throws IOException {
+  public StorageContainerDatanodeProtocolProtos.NodeReportProto getNodeReport() throws IOException {
     StorageLocationReport[] reports = volumeSet.getStorageReport();
-    StorageContainerDatanodeProtocolProtos.NodeReportProto.Builder nrb
-            = StorageContainerDatanodeProtocolProtos.
-            NodeReportProto.newBuilder();
-    for (int i = 0; i < reports.length; i++) {
-      nrb.addStorageReport(reports[i].getProtoBufMessage(config));
+    StorageContainerDatanodeProtocolProtos.NodeReportProto.Builder nrb =
+        StorageContainerDatanodeProtocolProtos.NodeReportProto.newBuilder();
+    for (StorageLocationReport report : reports) {
+      nrb.addStorageReport(report.getProtoBufMessage(config));
     }
 
     StorageLocationReport[] metaReports = metaVolumeSet.getStorageReport();
-    for (int i = 0; i < metaReports.length; i++) {
-      nrb.addMetadataStorageReport(
-          metaReports[i].getMetadataProtoBufMessage());
+    for (StorageLocationReport metaReport : metaReports) {
+      nrb.addMetadataStorageReport(metaReport.getMetadataProtoBufMessage());
     }
 
     if (dbVolumeSet != null) {
       StorageLocationReport[] dbReports = dbVolumeSet.getStorageReport();
-      for (int i = 0; i < dbReports.length; i++) {
-        nrb.addDbStorageReport(dbReports[i].getProtoBufMessage());
+      for (StorageLocationReport dbReport : dbReports) {
+        nrb.addDbStorageReport(dbReport.getProtoBufMessage());
       }
     }
 
     return nrb.build();
   }
 
+  /**
+   * Retrieves the ContainerDispatcher associated with this OzoneContainer.
+   *
+   * @return ContainerDispatcher instance used for dispatching container commands.
+   */
   @VisibleForTesting
   public ContainerDispatcher getDispatcher() {
     return this.hddsDispatcher;
   }
 
+  /**
+   * Retrieves the volume set associated with this OzoneContainer.
+   *
+   * @return The MutableVolumeSet instance representing the volume set for this container.
+   */
   public MutableVolumeSet getVolumeSet() {
     return volumeSet;
   }
 
-  public MutableVolumeSet getMetaVolumeSet() {
-    return metaVolumeSet;
-  }
-
+  /**
+   * Retrieves the DB volume set associated with this OzoneContainer.
+   *
+   * @return The MutableVolumeSet instance representing the DB volume set for this container.
+   */
   public MutableVolumeSet getDbVolumeSet() {
     return dbVolumeSet;
   }
 
+  /**
+   * Retrieves the metrics related to this OzoneContainer.
+   *
+   * @return ContainerMetrics instance containing various metrics of the container.
+   */
   public ContainerMetrics getMetrics() {
     return metrics;
   }
 
+  /**
+   * Retrieves the service responsible for deleting blocks in this OzoneContainer.
+   *
+   * @return BlockDeletingService instance managing block deletions.
+   */
   public BlockDeletingService getBlockDeletingService() {
     return blockDeletingService;
   }
 
+  /**
+   * Retrieves the replication server associated with this OzoneContainer.
+   *
+   * @return ReplicationServer instance managing replication tasks for this container.
+   */
   public ReplicationServer getReplicationServer() {
     return replicationServer;
   }
 
+  /**
+   * Initiates the compaction of databases for all storage volumes associated with this OzoneContainer.
+   * <p>
+   * For each storage volume in the volume set,
+   * this method starts an asynchronous task that triggers the database compaction process.
+   * The asynchronous tasks are executed using the dbCompactionExecutorService.
+   * <p>
+   * This is useful for optimizing database storage by reclaiming unused space and enhancing read/write performance.
+   */
   public void compactDb() {
     for (StorageVolume volume : volumeSet.getVolumesList()) {
       HddsVolume hddsVolume = (HddsVolume) volume;
@@ -632,5 +689,4 @@ public class OzoneContainer {
           dbCompactionExecutorService);
     }
   }
-
 }

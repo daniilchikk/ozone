@@ -52,64 +52,57 @@ import static org.apache.hadoop.ozone.container.common.impl.ContainerLayoutVersi
  */
 public class ChunkManagerDispatcher implements ChunkManager {
 
-  private static final Logger LOG =
-      LoggerFactory.getLogger(ChunkManagerDispatcher.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ChunkManagerDispatcher.class);
 
-  private final Map<ContainerLayoutVersion, ChunkManager> handlers
-      = new EnumMap<>(ContainerLayoutVersion.class);
+  private final Map<ContainerLayoutVersion, ChunkManager> handlers = new EnumMap<>(ContainerLayoutVersion.class);
 
-  ChunkManagerDispatcher(boolean sync, BlockManager manager,
-                         VolumeSet volSet) {
-    handlers.put(FILE_PER_CHUNK,
-        new FilePerChunkStrategy(sync, manager, volSet));
-    handlers.put(FILE_PER_BLOCK,
-        new FilePerBlockStrategy(sync, manager, volSet));
+  ChunkManagerDispatcher(boolean sync, BlockManager manager, VolumeSet volSet) {
+    handlers.put(FILE_PER_CHUNK, new FilePerChunkStrategy(sync, manager, volSet));
+    handlers.put(FILE_PER_BLOCK, new FilePerBlockStrategy(sync, manager));
   }
 
   @Override
-  public void writeChunk(Container container, BlockID blockID, ChunkInfo info,
-      ChunkBuffer data, DispatcherContext dispatcherContext)
+  public void writeChunk(Container container, BlockID blockID, ChunkInfo info, ChunkBuffer data,
+      DispatcherContext dispatcherContext) throws StorageContainerException {
+
+    selectHandler(container).writeChunk(container, blockID, info, data, dispatcherContext);
+  }
+
+  /**
+   * Initializes a stream for a given container and block ID.
+   *
+   * @param container the container in which the stream is being initialized
+   * @param blockID the block ID for which the stream is being initialized
+   * @return a String representing the initialization state of the stream
+   * @throws StorageContainerException if there is an error during stream initialization
+   */
+  @Override
+  public String streamInit(Container container, BlockID blockID) throws StorageContainerException {
+    return selectHandler(container).streamInit(container, blockID);
+  }
+
+  @Override
+  public StateMachine.DataChannel getStreamDataChannel(Container container, BlockID blockID, ContainerMetrics metrics)
       throws StorageContainerException {
-
-    selectHandler(container)
-        .writeChunk(container, blockID, info, data, dispatcherContext);
-  }
-
-  public String streamInit(Container container, BlockID blockID)
-      throws StorageContainerException {
-    return selectHandler(container)
-        .streamInit(container, blockID);
+    return selectHandler(container).getStreamDataChannel(container, blockID, metrics);
   }
 
   @Override
-  public StateMachine.DataChannel getStreamDataChannel(
-          Container container, BlockID blockID, ContainerMetrics metrics)
-          throws StorageContainerException {
-    return selectHandler(container)
-            .getStreamDataChannel(container, blockID, metrics);
+  public void finishWriteChunks(KeyValueContainer kvContainer, BlockData blockData) throws IOException {
+
+    selectHandler(kvContainer).finishWriteChunks(kvContainer, blockData);
   }
 
   @Override
-  public void finishWriteChunks(KeyValueContainer kvContainer,
-      BlockData blockData) throws IOException {
-
-    selectHandler(kvContainer)
-        .finishWriteChunks(kvContainer, blockData);
-  }
-
-  @Override
-  public void finalizeWriteChunk(KeyValueContainer kvContainer,
-      BlockID blockId) throws IOException {
+  public void finalizeWriteChunk(KeyValueContainer kvContainer, BlockID blockId) throws IOException {
     selectHandler(kvContainer).finalizeWriteChunk(kvContainer, blockId);
   }
 
   @Override
-  public ChunkBuffer readChunk(Container container, BlockID blockID,
-      ChunkInfo info, DispatcherContext dispatcherContext)
-      throws StorageContainerException {
+  public ChunkBuffer readChunk(Container container, BlockID blockID, ChunkInfo info,
+      DispatcherContext dispatcherContext) throws StorageContainerException {
 
-    ChunkBuffer data = selectHandler(container)
-        .readChunk(container, blockID, info, dispatcherContext);
+    ChunkBuffer data = selectHandler(container).readChunk(container, blockID, info, dispatcherContext);
 
     Preconditions.checkState(data != null);
     container.getContainerData().updateReadStats(data.remaining());
@@ -118,28 +111,23 @@ public class ChunkManagerDispatcher implements ChunkManager {
   }
 
   @Override
-  public void deleteChunk(Container container, BlockID blockID, ChunkInfo info)
-      throws StorageContainerException {
-
+  public void deleteChunk(Container container, BlockID blockID, ChunkInfo info) throws StorageContainerException {
     Preconditions.checkNotNull(blockID, "Block ID cannot be null.");
 
     // Delete the chunk from disk.
-    // Do not decrement the ContainerData counters (usedBytes) here as it
-    // will be updated while deleting the block from the DB
+    // Do not decrement the ContainerData counters (usedBytes)
+    // here as it will be updated while deleting the block from the DB
 
     selectHandler(container).deleteChunk(container, blockID, info);
-
   }
 
   @Override
-  public void deleteChunks(Container container, BlockData blockData)
-      throws StorageContainerException {
-
+  public void deleteChunks(Container container, BlockData blockData) throws StorageContainerException {
     Preconditions.checkNotNull(blockData, "Block data cannot be null.");
 
     // Delete the chunks belonging to blockData.
-    // Do not decrement the ContainerData counters (usedBytes) here as it
-    // will be updated while deleting the block from the DB
+    // Do not decrement the ContainerData counters (usedBytes)
+    // here as it will be updated while deleting the block from the DB
 
     selectHandler(container).deleteChunks(container, blockData);
   }
@@ -149,17 +137,12 @@ public class ChunkManagerDispatcher implements ChunkManager {
     handlers.values().forEach(ChunkManager::shutdown);
   }
 
-  private @Nonnull ChunkManager selectHandler(Container container)
-      throws StorageContainerException {
-
-    ContainerLayoutVersion layout =
-        container.getContainerData().getLayoutVersion();
+  private @Nonnull ChunkManager selectHandler(Container container) throws StorageContainerException {
+    ContainerLayoutVersion layout = container.getContainerData().getLayoutVersion();
     return selectVersionHandler(layout);
   }
 
-  private @Nonnull ChunkManager selectVersionHandler(
-      ContainerLayoutVersion version)
-      throws StorageContainerException {
+  private @Nonnull ChunkManager selectVersionHandler(ContainerLayoutVersion version) throws StorageContainerException {
     ChunkManager versionHandler = handlers.get(version);
     if (versionHandler == null) {
       return throwUnknownLayoutVersion(version);
@@ -167,13 +150,12 @@ public class ChunkManagerDispatcher implements ChunkManager {
     return versionHandler;
   }
 
-  private static ChunkManager throwUnknownLayoutVersion(
-      ContainerLayoutVersion version) throws StorageContainerException {
+  private static ChunkManager throwUnknownLayoutVersion(ContainerLayoutVersion version)
+      throws StorageContainerException {
 
     String message = "Unsupported storage container layout: " + version;
     LOG.warn(message);
     // TODO pick best result code
     throw new StorageContainerException(message, UNSUPPORTED_REQUEST);
   }
-
 }

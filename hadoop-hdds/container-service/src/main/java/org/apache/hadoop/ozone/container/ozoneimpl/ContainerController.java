@@ -50,11 +50,9 @@ public class ContainerController {
 
   private final ContainerSet containerSet;
   private final Map<ContainerType, Handler> handlers;
-  private static final Logger LOG =
-      LoggerFactory.getLogger(ContainerController.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ContainerController.class);
 
-  public ContainerController(final ContainerSet containerSet,
-      final Map<ContainerType, Handler> handlers) {
+  public ContainerController(final ContainerSet containerSet, final Map<ContainerType, Handler> handlers) {
     this.containerSet = containerSet;
     this.handlers = handlers;
   }
@@ -69,6 +67,12 @@ public class ContainerController {
     return containerSet.getContainer(containerId);
   }
 
+  /**
+   * Retrieves the file path location of the specified container.
+   *
+   * @param containerId the ID of the container to find
+   * @return the container file path if the container exists, otherwise "nonexistent"
+   */
   public String getContainerLocation(final long containerId) {
     Container cont = containerSet.getContainer(containerId);
     if (cont != null) {
@@ -84,15 +88,13 @@ public class ContainerController {
    * @param containerId Id of the container to update
    * @throws IOException in case of exception
    */
-  public void markContainerForClose(final long containerId)
-      throws IOException {
+  public void markContainerForClose(final long containerId) throws IOException {
     Container container = containerSet.getContainer(containerId);
     if (container == null) {
       String warning;
       Set<Long> missingContainerSet = containerSet.getMissingContainerSet();
       if (missingContainerSet.contains(containerId)) {
-        warning = "The Container is in the MissingContainerSet " +
-                "hence we can't close it. ContainerID: " + containerId;
+        warning = "The Container is in the MissingContainerSet hence we can't close it. ContainerID: " + containerId;
       } else {
         warning = "The Container is not found. ContainerID: " + containerId;
       }
@@ -112,14 +114,12 @@ public class ContainerController {
    * @param reason The reason the container was marked unhealthy
    * @throws IOException in case of exception
    */
-  public void markContainerUnhealthy(final long containerId, ScanResult reason)
-          throws IOException {
+  public void markContainerUnhealthy(final long containerId, ScanResult reason) throws IOException {
     Container container = containerSet.getContainer(containerId);
     if (container != null) {
       getHandler(container).markContainerUnhealthy(container, reason);
     } else {
-      LOG.warn("Container {} not found, may be deleted, skip mark UNHEALTHY",
-          containerId);
+      LOG.warn("Container {} not found, may be deleted, skip mark UNHEALTHY", containerId);
     }
   }
 
@@ -129,8 +129,7 @@ public class ContainerController {
    * @return ContainerReportsProto
    * @throws IOException in case of exception
    */
-  public ContainerReportsProto getContainerReport()
-      throws IOException {
+  public ContainerReportsProto getContainerReport() throws IOException {
     return containerSet.getContainerReport();
   }
 
@@ -138,18 +137,16 @@ public class ContainerController {
    * Quasi closes a container given its id.
    *
    * @param containerId Id of the container to quasi close
-   * @param reason The reason the container was quasi closed, for logging
-   *               purposes.
+   * @param reason The reason the container was quasi closed, for logging purposes.
    * @throws IOException in case of exception
    */
-  public void quasiCloseContainer(final long containerId, String reason)
-      throws IOException {
+  public void quasiCloseContainer(final long containerId, String reason) throws IOException {
     final Container container = containerSet.getContainer(containerId);
     getHandler(container).quasiCloseContainer(container, reason);
   }
 
   /**
-   * Closes a container given its Id.
+   * Closes a container given its id.
    *
    * @param containerId Id of the container to close
    * @throws IOException in case of exception
@@ -164,16 +161,21 @@ public class ContainerController {
    *
    * @param containerId ID of the container
    */
-  public void addFinalizedBlock(final long containerId,
-      final long localId) {
+  public void addFinalizedBlock(final long containerId, final long localId) {
     Container container = containerSet.getContainer(containerId);
     if (container != null) {
       getHandler(container).addFinalizedBlock(container, localId);
     }
   }
 
-  public boolean isFinalizedBlockExist(final long containerId,
-      final long localId) {
+  /**
+   * Checks if a finalized block exists within a specified container.
+   *
+   * @param containerId ID of the container to check
+   * @param localId ID of the block to check within the container
+   * @return {@code true} if the finalized block exists, {@code false} otherwise
+   */
+  public boolean isFinalizedBlockExist(final long containerId, final long localId) {
     Container container = containerSet.getContainer(containerId);
     if (container != null) {
       return getHandler(container).isFinalizedBlockExist(container, localId);
@@ -181,29 +183,43 @@ public class ContainerController {
     return false;
   }
 
-  public Container importContainer(
-      final ContainerData containerData,
-      final InputStream rawContainerStream,
+  /**
+   * Imports a container based on the provided container data, raw container stream,
+   * and tar container packer.
+   *
+   * @param containerData the data representing the container to be imported
+   * @param rawContainerStream the InputStream containing the raw container data
+   * @param packer the TarContainerPacker used to handle the container import
+   * @return the imported Container
+   * @throws IOException if an I/O error occurs during the import process
+   */
+  public Container importContainer(final ContainerData containerData, final InputStream rawContainerStream,
       final TarContainerPacker packer) throws IOException {
-    return handlers.get(containerData.getContainerType())
-        .importContainer(containerData, rawContainerStream, packer);
-  }
-
-  public void exportContainer(final ContainerType type,
-      final long containerId, final OutputStream outputStream,
-      final TarContainerPacker packer) throws IOException {
-    handlers.get(type).exportContainer(
-        containerSet.getContainer(containerId), outputStream, packer);
+    return handlers.get(containerData.getContainerType()).importContainer(containerData, rawContainerStream, packer);
   }
 
   /**
-   * Deletes a container given its Id.
+   * Exports a container of the specified type and ID to the provided output stream,
+   * using the given tar container packer.
+   *
+   * @param type the type of the container to be exported
+   * @param containerId the ID of the container to be exported
+   * @param outputStream the output stream to which the container will be exported
+   * @param packer the tar container packer used for packing the container data
+   * @throws IOException if an I/O error occurs during exporting
+   */
+  public void exportContainer(final ContainerType type, final long containerId, final OutputStream outputStream,
+      final TarContainerPacker packer) throws IOException {
+    handlers.get(type).exportContainer(containerSet.getContainer(containerId), outputStream, packer);
+  }
+
+  /**
+   * Deletes a container given its id.
    * @param containerId Id of the container to be deleted
    * @param force if this is set to true, we delete container without checking
    * state of the container.
    */
-  public void deleteContainer(final long containerId, boolean force)
-      throws IOException {
+  public void deleteContainer(final long containerId, boolean force) throws IOException {
     final Container container = containerSet.getContainer(containerId);
     if (container != null) {
       getHandler(container).deleteContainer(container, force);
@@ -220,13 +236,17 @@ public class ContainerController {
     return handlers.get(container.getContainerType());
   }
 
+  /**
+   * Retrieves an iterable collection of all containers managed by this controller.
+   *
+   * @return an iterable collection of containers
+   */
   public Iterable<Container<?>> getContainers() {
     return containerSet;
   }
 
   /**
-   * Return an iterator of containers which are associated with the specified
-   * <code>volume</code>.
+   * Return an iterator of containers which are associated with the specified <code>volume</code>.
    *
    * @param  volume the HDDS volume which should be used to filter containers
    * @return {@literal Iterator<Container>}
@@ -245,15 +265,12 @@ public class ContainerController {
     return containerSet.containerCount(volume);
   }
 
-  void updateDataScanTimestamp(long containerId, Instant timestamp)
-      throws IOException {
+  void updateDataScanTimestamp(long containerId, Instant timestamp) throws IOException {
     Container container = containerSet.getContainer(containerId);
     if (container != null) {
       container.updateDataScanTimestamp(timestamp);
     } else {
-      LOG.warn("Container {} not found, may be deleted, " +
-          "skip update DataScanTimestamp", containerId);
+      LOG.warn("Container {} not found, may be deleted, skip update DataScanTimestamp", containerId);
     }
   }
-
 }

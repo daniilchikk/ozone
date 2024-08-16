@@ -82,16 +82,13 @@ import static org.mockito.Mockito.when;
 /**
  * Tests processing of containers written with DB schema version 2,
  * which stores all its data in a one-db-per-container layout.
- * Schema version 3 will use a one-db-per-disk layout, but it
- * should still be able to read, delete data, and update metadata for schema
- * version 2 containers.
- * We have a switch "hdds.datanode.container.schema.v3.enabled", so we could
- * create a test container with it off and turn it on later to
- * test the container operations above.
+ * Schema version 3 will use a one-db-per-disk layout,
+ * but it should still be able to read, delete data, and update metadata for schema version 2 containers.
+ * We have a switch "hdds.datanode.container.schema.v3.enabled",
+ * so we could create a test container with it off and turn it on later to test the container operations above.
  * <p>
- * The functionality executed by these tests assumes that all containers will
- * have to be closed before an upgrade, meaning that containers written with
- * schema version 2 will only ever be encountered in their closed state.
+ * The functionality executed by these tests assumes that all containers will have to be closed before an upgrade,
+ * meaning that containers written with schema version 2 will only ever be encountered in their closed state.
  * <p>
  */
 public class TestSchemaTwoBackwardsCompatibility {
@@ -105,7 +102,6 @@ public class TestSchemaTwoBackwardsCompatibility {
   private BlockManager blockManager;
   private ChunkManager chunkManager;
   private ContainerSet containerSet;
-  private KeyValueHandler keyValueHandler;
   private OzoneContainer ozoneContainer;
 
   private static final int BLOCKS_PER_CONTAINER = 6;
@@ -113,8 +109,7 @@ public class TestSchemaTwoBackwardsCompatibility {
   private static final int DELETE_TXNS_PER_CONTAINER = 2;
   private static final int BLOCKS_PER_TXN = 2;
   private static final int CHUNK_LENGTH = 1024;
-  private static final byte[] SAMPLE_DATA =
-      randomAlphanumeric(1024).getBytes(UTF_8);
+  private static final byte[] SAMPLE_DATA = randomAlphanumeric(1024).getBytes(UTF_8);
 
   @BeforeEach
   public void setup() throws Exception {
@@ -128,15 +123,21 @@ public class TestSchemaTwoBackwardsCompatibility {
     conf.set(ScmConfigKeys.HDDS_DATANODE_DIR_KEY, testRoot.getAbsolutePath());
     conf.set(HddsConfigKeys.OZONE_METADATA_DIRS, testRoot.getAbsolutePath());
 
-    volumeSet = new MutableVolumeSet(datanodeUuid, clusterID, conf, null,
-        StorageVolume.VolumeType.DATA_VOLUME, null);
+    volumeSet = new MutableVolumeSet(
+        datanodeUuid,
+        clusterID,
+        conf,
+        null,
+        StorageVolume.VolumeType.DATA_VOLUME,
+        null);
 
     blockManager = new BlockManagerImpl(conf);
-    chunkManager = new FilePerBlockStrategy(true, blockManager, volumeSet);
+    chunkManager = new FilePerBlockStrategy(true, blockManager);
 
     containerSet = new ContainerSet(1000);
-    keyValueHandler = new KeyValueHandler(conf, datanodeUuid,
-        containerSet, volumeSet, ContainerMetrics.create(conf), c -> { });
+    KeyValueHandler keyValueHandler = new KeyValueHandler(conf, datanodeUuid,
+        containerSet, volumeSet, ContainerMetrics.create(conf), c -> {
+    });
     ozoneContainer = mock(OzoneContainer.class);
     when(ozoneContainer.getContainerSet()).thenReturn(containerSet);
     when(ozoneContainer.getWriteChannel()).thenReturn(null);
@@ -152,33 +153,28 @@ public class TestSchemaTwoBackwardsCompatibility {
 
   @Test
   public void testDBFile() throws IOException {
-    // create a container of schema v2
+    // Create a container of schema v2
     KeyValueContainer container = createTestContainer();
-    assertEquals(container.getContainerData().getSchemaVersion(),
-        OzoneConsts.SCHEMA_V2);
+    assertEquals(container.getContainerData().getSchemaVersion(), OzoneConsts.SCHEMA_V2);
 
     // db file should be under the container path
-    String containerPath = container.getContainerData().getDbFile()
-        .getParentFile().getParentFile().getName();
-    assertEquals(containerPath,
-        Long.toString(container.getContainerData().getContainerID()));
+    String containerPath = container.getContainerData().getDbFile().getParentFile().getParentFile().getName();
+    assertEquals(containerPath, Long.toString(container.getContainerData().getContainerID()));
   }
 
   @Test
   public void testBlockIteration() throws IOException {
-    // create a container of schema v2
+    // Create a container of schema v2
     KeyValueContainer container = createTestContainer();
-    assertEquals(container.getContainerData().getSchemaVersion(),
-        OzoneConsts.SCHEMA_V2);
+    assertEquals(container.getContainerData().getSchemaVersion(), OzoneConsts.SCHEMA_V2);
 
-    // turn on schema v3 first, then do operations
+    // Turn on schema v3 first, then do operations
     ContainerTestUtils.enableSchemaV3(conf);
 
     try (DBHandle db = BlockUtils.getDB(container.getContainerData(), conf)) {
       long containerID = container.getContainerData().getContainerID();
       int blockCount = 0;
-      try (BlockIterator<BlockData> iter = db.getStore()
-          .getBlockIterator(containerID)) {
+      try (BlockIterator<BlockData> iter = db.getStore().getBlockIterator(containerID)) {
         while (iter.hasNext()) {
           BlockData blockData = iter.nextBlock();
           int chunkCount = 0;
@@ -196,136 +192,119 @@ public class TestSchemaTwoBackwardsCompatibility {
 
   @Test
   public void testReadMetadata() throws IOException {
-    // create a container of schema v2
+    // Create a container of schema v2
     KeyValueContainer container = createTestContainer();
-    assertEquals(container.getContainerData().getSchemaVersion(),
-        OzoneConsts.SCHEMA_V2);
+    assertEquals(container.getContainerData().getSchemaVersion(), OzoneConsts.SCHEMA_V2);
     KeyValueContainerData cData = container.getContainerData();
     assertEquals(cData.getBlockCount(), BLOCKS_PER_CONTAINER);
-    assertEquals(cData.getNumPendingDeletionBlocks(),
-        DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN);
-    assertEquals(cData.getBytesUsed(),
-        CHUNK_LENGTH * CHUNKS_PER_BLOCK * BLOCKS_PER_CONTAINER);
+    assertEquals(cData.getNumPendingDeletionBlocks(), DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN);
+    assertEquals(cData.getBytesUsed(), CHUNK_LENGTH * CHUNKS_PER_BLOCK * BLOCKS_PER_CONTAINER);
 
-    // turn on schema v3 first, then do operations
+    // Turn on schema v3 first, then do operations
     ContainerTestUtils.enableSchemaV3(conf);
 
     try (DBHandle db = BlockUtils.getDB(cData, conf)) {
       Table<String, Long> metadatatable = db.getStore().getMetadataTable();
-      assertEquals((long)metadatatable.get(BLOCK_COUNT),
-          BLOCKS_PER_CONTAINER);
-      assertEquals((long)metadatatable.get(PENDING_DELETE_BLOCK_COUNT),
-          DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN);
+      assertEquals((long)metadatatable.get(BLOCK_COUNT), BLOCKS_PER_CONTAINER);
+      assertEquals((long)metadatatable.get(PENDING_DELETE_BLOCK_COUNT), DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN);
       assertEquals((long)metadatatable.get(CONTAINER_BYTES_USED),
           CHUNK_LENGTH * CHUNKS_PER_BLOCK * BLOCKS_PER_CONTAINER);
     }
   }
 
   @Test
-  public void testDeleteViaTransation() throws IOException, TimeoutException,
+  public void testDeleteViaTransition() throws IOException, TimeoutException,
       InterruptedException {
     conf.setInt(OZONE_BLOCK_DELETING_CONTAINER_LIMIT_PER_INTERVAL, 10);
-    conf.setInt(OzoneConfigKeys.OZONE_BLOCK_DELETING_LIMIT_PER_CONTAINER,
-        BLOCKS_PER_CONTAINER);
+    conf.setInt(OzoneConfigKeys.OZONE_BLOCK_DELETING_LIMIT_PER_CONTAINER, BLOCKS_PER_CONTAINER);
 
-    // create a container of schema v2
+    // Create a container of schema v2
     KeyValueContainer container = createTestContainer();
-    assertEquals(container.getContainerData().getSchemaVersion(),
-        OzoneConsts.SCHEMA_V2);
-    // close it
+    assertEquals(container.getContainerData().getSchemaVersion(), OzoneConsts.SCHEMA_V2);
+    // Close it
     container.close();
     containerSet.addContainer(container);
     KeyValueContainerData cData = container.getContainerData();
 
-    // turn on schema v3 first, then do operations
+    // Turn on schema v3 first, then do operations
     ContainerTestUtils.enableSchemaV3(conf);
 
-    // start block deleting service
+    // Start block deleting service
     long initialTotalSpace = cData.getBytesUsed();
-    BlockDeletingServiceTestImpl service =
-        new BlockDeletingServiceTestImpl(ozoneContainer, 1000, conf);
+    BlockDeletingServiceTestImpl service = new BlockDeletingServiceTestImpl(ozoneContainer, 1000, conf);
     service.start();
     GenericTestUtils.waitFor(service::isStarted, 100, 3000);
     service.runDeletingTasks();
-    GenericTestUtils.waitFor(() -> service.getTimesOfProcessed() == 1,
-        100, 3000);
-    GenericTestUtils.waitFor(() -> cData.getBytesUsed() != initialTotalSpace,
-        100, 3000);
+    GenericTestUtils.waitFor(() -> service.getTimesOfProcessed() == 1, 100, 3000);
+    GenericTestUtils.waitFor(() -> cData.getBytesUsed() != initialTotalSpace, 100, 3000);
 
-    // check in-memory metadata after deletion
+    // Check in-memory metadata after deletion
     long blockSize = CHUNK_LENGTH * CHUNKS_PER_BLOCK;
-    long expectedKeyCount = BLOCKS_PER_CONTAINER -
-        DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN;
+    long expectedKeyCount = BLOCKS_PER_CONTAINER - DELETE_TXNS_PER_CONTAINER * BLOCKS_PER_TXN;
     long expectedBytesUsed = blockSize * expectedKeyCount;
     assertEquals(cData.getBlockCount(), expectedKeyCount);
     assertEquals(cData.getNumPendingDeletionBlocks(), 0);
     assertEquals(cData.getBytesUsed(), expectedBytesUsed);
 
-    // check db metadata after deletion
+    // Check db metadata after deletion
     try (DBHandle db = BlockUtils.getDB(cData, conf)) {
       Table<String, Long> metadatatable = db.getStore().getMetadataTable();
       assertEquals((long)metadatatable.get(BLOCK_COUNT), expectedKeyCount);
       assertEquals((long)metadatatable.get(PENDING_DELETE_BLOCK_COUNT), 0);
-      assertEquals((long)metadatatable.get(CONTAINER_BYTES_USED),
-          expectedBytesUsed);
+      assertEquals((long)metadatatable.get(CONTAINER_BYTES_USED), expectedBytesUsed);
     }
   }
 
   private KeyValueContainer createTestContainer() throws IOException {
     long containerID = ContainerTestHelper.getTestContainerID();
-    KeyValueContainerData cData = new KeyValueContainerData(containerID,
+    KeyValueContainerData cData = new KeyValueContainerData(
+        containerID,
         ContainerLayoutVersion.FILE_PER_BLOCK,
         ContainerTestHelper.CONTAINER_MAX_SIZE,
-        UUID.randomUUID().toString(), datanodeUuid);
+        UUID.randomUUID().toString(),
+        datanodeUuid);
     cData.setSchemaVersion(OzoneConsts.SCHEMA_V2);
     KeyValueContainer container = new KeyValueContainer(cData, conf);
-    container.create(volumeSet, new RoundRobinVolumeChoosingPolicy(),
-        clusterID);
+    container.create(volumeSet, new RoundRobinVolumeChoosingPolicy(), clusterID);
 
-    // populate with some blocks
-    // metadata will be updated here, too
+    // Populate with some block metadata will be updated here, too
     for (long localID = 0; localID < BLOCKS_PER_CONTAINER; localID++) {
       BlockData blockData = createTestBlockData(localID, container);
       blockManager.putBlock(container, blockData);
     }
 
-    // populate with some delete txns
+    // Populate with some delete txns
     for (long txnID = 0; txnID < DELETE_TXNS_PER_CONTAINER; txnID++) {
       long startBlockID = txnID * DELETE_TXNS_PER_CONTAINER;
       List<Long> blocks = Arrays.asList(startBlockID, startBlockID + 1);
-      DeletedBlocksTransaction txn =
-          createTestDeleteTxn(txnID, blocks, containerID);
-      try (DBHandle db = BlockUtils.getDB(cData, conf)) {
-        try (BatchOperation batch = db.getStore().getBatchHandler()
-            .initBatchOperation()) {
-          DatanodeStoreSchemaTwoImpl dnStoreTwoImpl =
-              (DatanodeStoreSchemaTwoImpl) db.getStore();
-          dnStoreTwoImpl.getDeleteTransactionTable()
-              .putWithBatch(batch, txnID, txn);
+      DeletedBlocksTransaction txn = createTestDeleteTxn(txnID, blocks, containerID);
+      try (DBHandle db = BlockUtils.getDB(cData, conf);
+           BatchOperation batch = db.getStore().getBatchHandler().initBatchOperation()) {
+        DatanodeStoreSchemaTwoImpl dnStoreTwoImpl = (DatanodeStoreSchemaTwoImpl) db.getStore();
+        dnStoreTwoImpl.getDeleteTransactionTable().putWithBatch(batch, txnID, txn);
 
-          // update delete related metadata
-          db.getStore().getMetadataTable().putWithBatch(batch,
-              cData.getLatestDeleteTxnKey(), txn.getTxID());
-          db.getStore().getMetadataTable().putWithBatch(batch,
-              cData.getPendingDeleteBlockCountKey(),
-              cData.getNumPendingDeletionBlocks() + BLOCKS_PER_TXN);
-          db.getStore().getBatchHandler().commitBatchOperation(batch);
+        // Update delete related metadata
+        db.getStore().getMetadataTable().putWithBatch(batch, cData.getLatestDeleteTxnKey(), txn.getTxID());
+        db.getStore().getMetadataTable()
+            .putWithBatch(
+                batch,
+                cData.getPendingDeleteBlockCountKey(),
+                cData.getNumPendingDeletionBlocks() + BLOCKS_PER_TXN);
+        db.getStore().getBatchHandler().commitBatchOperation(batch);
 
-          cData.updateDeleteTransactionId(txn.getTxID());
-          cData.incrPendingDeletionBlocks(BLOCKS_PER_TXN);
-        }
+        cData.updateDeleteTransactionId(txn.getTxID());
+        cData.incrPendingDeletionBlocks(BLOCKS_PER_TXN);
       }
     }
     return container;
   }
 
-  private BlockData createTestBlockData(long localID, Container container)
-      throws StorageContainerException {
+  private BlockData createTestBlockData(long localID, Container container) throws StorageContainerException {
     long containerID = container.getContainerData().getContainerID();
     BlockID blockID = new BlockID(containerID, localID);
     BlockData blockData = new BlockData(blockID);
 
-    // populate with some chunks
+    // Populate with some chunks
     for (int chunkIndex = 0; chunkIndex < CHUNKS_PER_BLOCK; chunkIndex++) {
       ChunkInfo chunk = createTestChunkData(chunkIndex, blockID, container);
       blockData.addChunk(chunk.getProtoBufMessage());
@@ -334,22 +313,22 @@ public class TestSchemaTwoBackwardsCompatibility {
     return blockData;
   }
 
-  private ChunkInfo createTestChunkData(long chunkIndex,
-      BlockID blockID, Container container) throws StorageContainerException {
+  private ChunkInfo createTestChunkData(long chunkIndex, BlockID blockID, Container container)
+      throws StorageContainerException {
     String chunkName = blockID.getLocalID() + "_chunk_" + (chunkIndex + 1);
     ChunkBuffer chunkData = ChunkBuffer.wrap(ByteBuffer.wrap(SAMPLE_DATA));
-    ChunkInfo chunkInfo = new ChunkInfo(chunkName,
-        chunkIndex * CHUNK_LENGTH, CHUNK_LENGTH);
-    chunkManager
-        .writeChunk(container, blockID, chunkInfo, chunkData, WRITE_STAGE);
-    chunkManager
-        .writeChunk(container, blockID, chunkInfo, chunkData, COMMIT_STAGE);
+    ChunkInfo chunkInfo = new ChunkInfo(chunkName, chunkIndex * CHUNK_LENGTH, CHUNK_LENGTH);
+    chunkManager.writeChunk(container, blockID, chunkInfo, chunkData, WRITE_STAGE);
+    chunkManager.writeChunk(container, blockID, chunkInfo, chunkData, COMMIT_STAGE);
     return chunkInfo;
   }
 
-  private DeletedBlocksTransaction createTestDeleteTxn(long txnID,
-      List<Long> blocks, long containerID) {
-    return DeletedBlocksTransaction.newBuilder().setTxID(txnID)
-        .setContainerID(containerID).addAllLocalID(blocks).setCount(0).build();
+  private DeletedBlocksTransaction createTestDeleteTxn(long txnID, List<Long> blocks, long containerID) {
+    return DeletedBlocksTransaction.newBuilder()
+        .setTxID(txnID)
+        .setContainerID(containerID)
+        .addAllLocalID(blocks)
+        .setCount(0)
+        .build();
   }
 }

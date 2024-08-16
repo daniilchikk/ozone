@@ -47,8 +47,7 @@ public interface BlockManager {
    *                     all the chunks are written and stream is closed)
    * @return length of the Block.
    */
-  long putBlock(Container container, BlockData data, boolean endOfBlock)
-      throws IOException;
+  long putBlock(Container container, BlockData data, boolean endOfBlock) throws IOException;
 
   /**
    * Gets an existing block.
@@ -60,14 +59,14 @@ public interface BlockManager {
    */
   BlockData getBlock(Container container, BlockID blockID) throws IOException;
 
-
   /**
    * Deletes an existing block.
    *
    * @param container - Container from which block need to be deleted.
    * @param blockID - ID of the block.
    */
-  void deleteBlock(Container container, BlockID blockID) throws IOException;
+  @Deprecated
+  void deleteBlock(Container container, BlockID blockID);
 
   /**
    * List blocks in a container.
@@ -77,23 +76,37 @@ public interface BlockManager {
    * @param count - Number of blocks to return.
    * @return List of Blocks that match the criteria.
    */
-  List<BlockData> listBlock(Container container, long startLocalID, int count)
-      throws IOException;
+  List<BlockData> listBlock(Container container, long startLocalID, int count) throws IOException;
 
   /**
    * Returns last committed length of the block.
    *
-   * @param container - Container from which block need to be fetched.
+   * @param container - Container from which block needs to be fetched.
    * @param blockID - BlockID of the block.
    * @return length of the block.
    * @throws IOException in case, the block key does not exist in db.
    */
-  long getCommittedBlockLength(Container container, BlockID blockID)
-      throws IOException;
+  long getCommittedBlockLength(Container container, BlockID blockID) throws IOException;
 
-  void finalizeBlock(Container container, BlockID blockId)
-      throws IOException;
+  /**
+   * Finalizes the specified block in a container.
+   * This may involve tasks such as writing final metadata, closing resources,
+   * or other operations required to mark the block as complete and immutable.
+   *
+   * @param container the container where the block resides.
+   *                  It should be an instance of Container and carry details about the associated storage unit.
+   * @param blockId   the identifier of the block that needs to be finalized.
+   *                  It should be an instance of BlockID and reference the specific block to be finalized.
+   * @throws IOException if there is an error during the finalization process,
+   *                  such as I/O issues or problems accessing the block.
+   */
+  void finalizeBlock(Container container, BlockID blockId) throws IOException;
 
+  /**
+   * Returns the default buffer capacity used for read operations.
+   *
+   * @return the default read buffer capacity.
+   */
   int getDefaultReadBufferCapacity();
 
   /** @return the threshold to read using memory mapped buffers. */
