@@ -59,25 +59,25 @@ import org.apache.hadoop.ozone.container.common.interfaces.Handler;
 import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
 import org.apache.hadoop.ozone.container.common.transport.server.ratis.DispatcherContext;
 import org.apache.hadoop.ozone.container.common.volume.HddsVolume;
-import org.apache.hadoop.ozone.container.ozoneimpl.OnDemandContainerDataScanner;
 import org.apache.hadoop.ozone.container.common.volume.VolumeUsage;
+import org.apache.hadoop.ozone.container.ozoneimpl.OnDemandContainerDataScanner;
 import org.apache.hadoop.util.Time;
 import org.apache.ratis.statemachine.StateMachine;
 import org.apache.ratis.thirdparty.com.google.protobuf.ProtocolMessageEnum;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.hadoop.ozone.audit.AuditLogger.PerformanceStringBuilder;
 import static org.apache.hadoop.hdds.scm.protocolPB.ContainerCommandResponseBuilders.malformedRequest;
 import static org.apache.hadoop.hdds.scm.protocolPB.ContainerCommandResponseBuilders.unsupportedRequest;
+import static org.apache.hadoop.ozone.audit.AuditLogger.PerformanceStringBuilder;
 import static org.apache.hadoop.ozone.container.common.interfaces.Container.ScanResult;
 
 /**
@@ -229,10 +229,10 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
         validateToken(msg);
       }
     } catch (IOException ioe) {
-      final String s = ContainerProtos.Result.BLOCK_TOKEN_VERIFICATION_FAILED
+      final String s = Result.BLOCK_TOKEN_VERIFICATION_FAILED
           + " for " + dispatcherContext + ": " + ioe.getMessage();
       final StorageContainerException sce = new StorageContainerException(
-          s, ioe, ContainerProtos.Result.BLOCK_TOKEN_VERIFICATION_FAILED);
+          s, ioe, Result.BLOCK_TOKEN_VERIFICATION_FAILED);
       return ContainerUtils.logAndReturnError(LOG, sce, msg);
     }
     // if the command gets executed other than Ratis, the default write stage is WriteChunkStage.COMBINED
@@ -259,7 +259,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
     if (getMissingContainerSet().contains(containerID)) {
       StorageContainerException sce = new StorageContainerException(
           "ContainerID " + containerID + " has been lost and cannot be recreated on this DataNode",
-          ContainerProtos.Result.CONTAINER_MISSING);
+          Result.CONTAINER_MISSING);
       audit(action, eventType, msg, dispatcherContext, AuditEventStatus.FAILURE, sce);
       return ContainerUtils.logAndReturnError(LOG, sce, msg);
     }
@@ -301,7 +301,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
       if (container == null) {
         StorageContainerException sce = new StorageContainerException(
             "ContainerID " + containerID + " does not exist",
-            ContainerProtos.Result.CONTAINER_NOT_FOUND);
+            Result.CONTAINER_NOT_FOUND);
         audit(action, eventType, msg, dispatcherContext, AuditEventStatus.FAILURE, sce);
         return ContainerUtils.logAndReturnError(LOG, sce, msg);
       }
@@ -322,7 +322,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
     if (handler == null) {
       StorageContainerException ex = new StorageContainerException("Invalid " +
           "ContainerType " + containerType,
-          ContainerProtos.Result.CONTAINER_INTERNAL_ERROR);
+          Result.CONTAINER_INTERNAL_ERROR);
       // log failure
       audit(action, eventType, msg, dispatcherContext, AuditEventStatus.FAILURE, ex);
       return ContainerUtils.logAndReturnError(LOG, ex, msg);
@@ -365,7 +365,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
           // TODO HDDS-7096 + HDDS-8781: Use on demand scanning for the open container instead.
           handler.markContainerUnhealthy(container,
               ScanResult.unhealthy(ScanResult.FailureType.WRITE_FAILURE,
-                  new File(container.getContainerData().getContainerPath()),
+                  Paths.get(container.getContainerData().getContainerPath()),
                   new StorageContainerException(result)));
           LOG.info("Marked Container UNHEALTHY, ContainerID: {}", containerID);
         } catch (IOException ioe) {
@@ -439,7 +439,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
   ContainerCommandResponseProto createContainer(ContainerCommandRequestProto containerRequest) {
     ContainerProtos.CreateContainerRequestProto.Builder createRequest =
         ContainerProtos.CreateContainerRequestProto.newBuilder();
-    ContainerType containerType = ContainerProtos.ContainerType.KeyValueContainer;
+    ContainerType containerType = ContainerType.KeyValueContainer;
     createRequest.setContainerType(containerType);
 
     if (containerRequest.hasWriteChunk()) {
@@ -484,9 +484,9 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
       validateToken(msg);
     } catch (IOException ioe) {
       throw new StorageContainerException(
-          ContainerProtos.Result.BLOCK_TOKEN_VERIFICATION_FAILED
+          Result.BLOCK_TOKEN_VERIFICATION_FAILED
           + ": " + ioe.getMessage(), ioe,
-          ContainerProtos.Result.BLOCK_TOKEN_VERIFICATION_FAILED);
+          Result.BLOCK_TOKEN_VERIFICATION_FAILED);
     }
 
     long containerID = msg.getContainerID();
@@ -502,7 +502,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
     if (handler == null) {
       StorageContainerException ex = new StorageContainerException(
           "Invalid ContainerType " + containerType,
-          ContainerProtos.Result.CONTAINER_INTERNAL_ERROR);
+          Result.CONTAINER_INTERNAL_ERROR);
       audit(action, eventType, msg, null, AuditEventStatus.FAILURE, ex);
       throw ex;
     }
@@ -590,7 +590,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
   }
 
   @Override
-  public Handler getHandler(ContainerProtos.ContainerType containerType) {
+  public Handler getHandler(ContainerType containerType) {
     return handlers.get(containerType);
   }
 
@@ -767,7 +767,7 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
     } else {
       throw new StorageContainerException(
               "ContainerID " + containerID + " does not exist",
-              ContainerProtos.Result.CONTAINER_NOT_FOUND);
+              Result.CONTAINER_NOT_FOUND);
     }
   }
 

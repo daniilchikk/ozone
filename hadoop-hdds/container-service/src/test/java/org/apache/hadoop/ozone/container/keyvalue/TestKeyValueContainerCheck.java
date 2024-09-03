@@ -34,14 +34,15 @@ import org.apache.hadoop.ozone.container.ozoneimpl.ContainerScannerConfiguration
 
 import java.io.File;
 import java.io.RandomAccessFile;
+import java.nio.file.Path;
 
 import static org.apache.hadoop.ozone.container.common.interfaces.Container.ScanResult.FailureType.DELETED_CONTAINER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.anyLong;
-import static org.mockito.Mockito.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -112,9 +113,8 @@ public class TestKeyValueContainerCheck
         new KeyValueContainerCheck(containerData.getMetadataPath(), conf,
             containerID, containerData.getVolume(), container);
 
-    File dbFile = KeyValueContainerLocationUtil
-        .getContainerDBFile(containerData);
-    containerData.setDbFile(dbFile);
+    Path dbFile = KeyValueContainerLocationUtil.getContainerDBFile(containerData);
+    containerData.setDbFile(dbFile.toFile());
     try (DBHandle ignored = BlockUtils.getDB(containerData, conf);
         BlockIterator<BlockData> kvIter =
                 ignored.getStore().getBlockIterator(containerID)) {
@@ -201,9 +201,7 @@ public class TestKeyValueContainerCheck
     when(mockContainerData.getChunksPath())
         .thenReturn(containerData.getChunksPath());
     when(mockContainerData.getBlockKey(anyLong()))
-        .thenAnswer(invocationOnMock -> {
-          return containerData.getBlockKey(invocationOnMock.getArgument(0));
-        });
+        .thenAnswer(invocationOnMock -> containerData.getBlockKey(invocationOnMock.getArgument(0)));
     when(mockContainerData.containerPrefix())
         .thenReturn(containerData.containerPrefix());
     when(mockContainerData.getBcsIdKey())

@@ -552,8 +552,17 @@ message VerifyBlockRequestProto {
 
 message VerifyBlockResponseProto {
   enum Reason {
-    MISSING_CHUNK = 1;
-    CORRUPTED_CHUNK = 2;
+    MISSING_CONTAINER_DIR = 1;
+    MISSING_METADATA_DIR = 2;
+    MISSING_CONTAINER_FILE = 3;
+    MISSING_CHUNKS_DIR = 4;
+    MISSING_CHUNK_FILE = 5;
+    CORRUPT_CONTAINER_FILE = 6;
+    CORRUPT_CHUNK = 7;
+    INCONSISTENT_CHUNK_LENGTH = 8;
+    INACCESSIBLE_DB = 9;
+    WRITE_FAILURE = 10;
+    DELETED_CONTAINER = 11;
   }
   required bool valid = 1;
   optional Reason reason = 2;

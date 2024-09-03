@@ -18,23 +18,9 @@
 
 package org.apache.hadoop.ozone.container.keyvalue;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Instant;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.fs.FileAlreadyExistsException;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.hdds.HddsUtils;
@@ -64,9 +50,24 @@ import org.apache.hadoop.ozone.container.keyvalue.helpers.KeyValueContainerUtil;
 import org.apache.hadoop.ozone.container.replication.ContainerImporter;
 import org.apache.hadoop.ozone.container.upgrade.VersionedDatanodeFeatures;
 import org.apache.hadoop.util.DiskChecker.DiskOutOfSpaceException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Preconditions;
-import org.apache.commons.io.FileUtils;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.CONTAINER_ALREADY_EXISTS;
@@ -80,9 +81,6 @@ import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Res
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.IO_EXCEPTION;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.UNSUPPORTED_REQUEST;
 import static org.apache.hadoop.ozone.container.common.utils.StorageVolumeUtil.onFailure;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Class to perform KeyValue Container operations.
@@ -791,7 +789,7 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
    */
   @Override
   public File getContainerFile() {
-    return getContainerFile(containerData.getMetadataPath(), containerData.getContainerID());
+    return getContainerFile(containerData.getMetadataPath(), containerData.getContainerID()).toFile();
   }
 
   /**
@@ -801,8 +799,8 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
    * @param containerId the identifier of the container
    * @return the container file represented as a {@link File} object
    */
-  public static File getContainerFile(String metadataPath, long containerId) {
-    return new File(metadataPath, containerId + OzoneConsts.CONTAINER_EXTENSION);
+  public static Path getContainerFile(String metadataPath, long containerId) {
+    return Paths.get(metadataPath).resolve(containerId + OzoneConsts.CONTAINER_EXTENSION);
   }
 
   @Override
@@ -916,8 +914,7 @@ public class KeyValueContainer implements Container<KeyValueContainerData> {
    * Returns container DB file.
    */
   public File getContainerDBFile() {
-    return KeyValueContainerLocationUtil.getContainerDBFile(containerData);
-
+    return KeyValueContainerLocationUtil.getContainerDBFile(containerData).toFile();
   }
 
   @Override

@@ -69,8 +69,7 @@ public final class ContainerLogger {
    * @param containerData The container that was quasi-closed.
    * @param message The reason the container was quasi-closed, if known.
    */
-  public static void logQuasiClosed(ContainerData containerData,
-      String message) {
+  public static void logQuasiClosed(ContainerData containerData, String message) {
     LOG.warn(getMessage(containerData, message));
   }
 
@@ -89,18 +88,18 @@ public final class ContainerLogger {
    * @param containerData The container that was marked unhealthy.
    * @param reason The reason the container was marked unhealthy.
    */
-  public static void logUnhealthy(ContainerData containerData,
-      ScanResult reason) {
-    String message = reason.getFailureType() + " for file " +
-        reason.getUnhealthyFile() +
-        ". Message: " + reason.getException().getMessage();
-    LOG.error(getMessage(containerData, message));
+  public static void logUnhealthy(ContainerData containerData, ScanResult reason) {
+    LOG.error("{} | {} for file {}. Message: {}",
+        getMessage(containerData),
+        reason.getFailureType(),
+        reason.getUnhealthyFile(),
+        reason.getException().getMessage()
+    );
   }
 
   /**
-   * Logged when a container is lost from this datanode. Currently this would
-   * only happen on volume failure. Container deletes do not count as lost
-   * containers.
+   * Logged when a container is lost from this datanode. Currently, this would only happen on volume failure.
+   * Container deletes do not count as lost containers.
    *
    * @param containerData The container that was lost.
    * @param message The reason the container was lost.

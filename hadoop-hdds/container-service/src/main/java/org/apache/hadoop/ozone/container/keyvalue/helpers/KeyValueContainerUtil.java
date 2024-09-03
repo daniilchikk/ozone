@@ -17,35 +17,33 @@
  */
 package org.apache.hadoop.ozone.container.keyvalue.helpers;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-
+import com.google.common.base.Preconditions;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.utils.MetadataKeyFilters;
 import org.apache.hadoop.hdds.utils.db.Table;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
 import org.apache.hadoop.ozone.container.common.helpers.ContainerUtils;
 import org.apache.hadoop.ozone.container.common.interfaces.BlockIterator;
+import org.apache.hadoop.ozone.container.common.interfaces.DBHandle;
 import org.apache.hadoop.ozone.container.common.statemachine.DatanodeConfiguration;
 import org.apache.hadoop.ozone.container.common.utils.ContainerInspectorUtil;
-import org.apache.hadoop.ozone.container.common.interfaces.DBHandle;
 import org.apache.hadoop.ozone.container.common.volume.HddsVolume;
 import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData;
-
-import com.google.common.base.Preconditions;
-import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.ozone.container.metadata.DatanodeStore;
 import org.apache.hadoop.ozone.container.metadata.DatanodeStoreSchemaOneImpl;
 import org.apache.hadoop.ozone.container.metadata.DatanodeStoreSchemaTwoImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import static org.apache.hadoop.ozone.OzoneConsts.SCHEMA_V1;
 
@@ -186,13 +184,13 @@ public final class KeyValueContainerUtil {
       kvContainerData.setSchemaVersion(OzoneConsts.SCHEMA_V1);
     }
 
-    File dbFile = KeyValueContainerLocationUtil.getContainerDBFile(kvContainerData);
-    if (!dbFile.exists()) {
+    Path dbFile = KeyValueContainerLocationUtil.getContainerDBFile(kvContainerData);
+    if (!Files.exists(dbFile)) {
       LOG.error("Container DB file is missing for ContainerID {}. Skipping loading of this container.", containerID);
       // Don't further process this container, as it is missing db file.
       throw new IOException("Container DB file is missing for containerID " + containerID);
     }
-    kvContainerData.setDbFile(dbFile);
+    kvContainerData.setDbFile(dbFile.toFile());
 
     DatanodeConfiguration dnConf = config.getObject(DatanodeConfiguration.class);
     boolean bCheckChunksFilePath = dnConf.getCheckEmptyContainerDir();

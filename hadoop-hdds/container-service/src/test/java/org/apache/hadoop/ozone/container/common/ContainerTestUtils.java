@@ -64,16 +64,16 @@ import org.apache.hadoop.ozone.protocolPB.StorageContainerDatanodeProtocolPB;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.mockito.Mockito;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static org.mockito.Mockito.any;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -232,7 +232,7 @@ public final class ContainerTestUtils {
    */
   public static ScanResult getUnhealthyScanResult() {
     return ScanResult.unhealthy(ScanResult.FailureType.CORRUPT_CHUNK,
-        new File(""),
+        Paths.get(""),
         new IOException("Fake corruption failure for testing"));
   }
 
@@ -241,7 +241,7 @@ public final class ContainerTestUtils {
    */
   public static ScanResult getDeletedContainerResult() {
     return ScanResult.unhealthy(ScanResult.FailureType.DELETED_CONTAINER,
-        new File(""),
+        Paths.get(""),
         new IOException("Fake deleted container exception"));
   }
 

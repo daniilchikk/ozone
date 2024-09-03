@@ -437,8 +437,7 @@ public class TestKeyValueContainer {
       assertEquals(expectedNumFilesInChunksDir, stream.count());
     }
     assertTrue(data.getDbFile().exists());
-    assertTrue(KeyValueContainer.getContainerFile(
-        data.getMetadataPath(), data.getContainerID()).exists());
+    assertTrue(Files.exists(KeyValueContainer.getContainerFile(data.getMetadataPath(), data.getContainerID())));
   }
 
   /**

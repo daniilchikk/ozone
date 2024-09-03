@@ -23,6 +23,12 @@ import org.apache.hadoop.ozone.common.Storage;
 import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData;
 
 import java.io.File;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import static org.apache.hadoop.ozone.OzoneConsts.CONTAINER_DB_NAME;
+import static org.apache.hadoop.ozone.OzoneConsts.DN_CONTAINER_DB;
+import static org.apache.hadoop.ozone.OzoneConsts.SCHEMA_V3;
 
 /**
  * Class which provides utility methods for container locations.
@@ -122,15 +128,13 @@ public final class KeyValueContainerLocationUtil {
   /**
    * Return containerDB File.
    */
-  public static File getContainerDBFile(KeyValueContainerData containerData) {
-    if (containerData.hasSchema(OzoneConsts.SCHEMA_V3)) {
+  public static Path getContainerDBFile(KeyValueContainerData containerData) {
+    if (containerData.hasSchema(SCHEMA_V3)) {
       Preconditions.checkNotNull(containerData.getVolume().getDbParentDir(), "Base Directory cannot be null");
-      return new File(containerData.getVolume().getDbParentDir(),
-          OzoneConsts.CONTAINER_DB_NAME);
+      return containerData.getVolume().getDbParentDir().toPath().resolve(CONTAINER_DB_NAME);
     }
     Preconditions.checkNotNull(containerData.getMetadataPath(), "Metadata Directory cannot be null");
-    return new File(containerData.getMetadataPath(), containerData.getContainerID() +
-        OzoneConsts.DN_CONTAINER_DB);
+    return Paths.get(containerData.getMetadataPath()).resolve(containerData.getContainerID() + DN_CONTAINER_DB);
   }
 
 }

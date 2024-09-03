@@ -24,7 +24,6 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBloc
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map;
 
@@ -43,5 +42,5 @@ public interface ContainerMultinodeApi extends AutoCloseable {
    * @throws InterruptedException if the verification process is interrupted
    */
   Map<DatanodeDetails, VerifyBlockResponseProto> verifyBlock(DatanodeBlockID datanodeBlockID,
-    Token<OzoneBlockTokenIdentifier> token) throws IOException, InterruptedException;
+      Token<OzoneBlockTokenIdentifier> token) throws IOException, InterruptedException;
 }

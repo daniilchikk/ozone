@@ -335,7 +335,7 @@ public class UpgradeTask {
 
       final File originContainerFile = KeyValueContainer
           .getContainerFile(keyValueContainerData.getMetadataPath(),
-              keyValueContainerData.getContainerID());
+              keyValueContainerData.getContainerID()).toFile();
 
       final File bakFile = new File(keyValueContainerData.getMetadataPath(),
           keyValueContainerData.getContainerID() +

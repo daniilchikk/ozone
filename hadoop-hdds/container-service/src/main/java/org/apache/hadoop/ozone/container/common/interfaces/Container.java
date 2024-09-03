@@ -18,21 +18,21 @@
 
 package org.apache.hadoop.ozone.container.common.interfaces;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.time.Instant;
-import java.util.Map;
-
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos.ContainerReplicaProto;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
-
 import org.apache.hadoop.hdfs.util.Canceler;
 import org.apache.hadoop.hdfs.util.DataTransferThrottler;
 import org.apache.hadoop.ozone.container.common.impl.ContainerData;
 import org.apache.hadoop.ozone.container.common.volume.VolumeSet;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.util.Map;
 
 /**
  * Interface for Container Operations.
@@ -61,12 +61,11 @@ public interface Container<CONTAINERDATA extends ContainerData> {
     }
 
     private final boolean healthy;
-    private final File unhealthyFile;
+    private final Path unhealthyFile;
     private final FailureType failureType;
     private final Throwable exception;
 
-    private ScanResult(boolean healthy, FailureType failureType,
-        File unhealthyFile, Throwable exception) {
+    private ScanResult(boolean healthy, FailureType failureType, Path unhealthyFile, Throwable exception) {
       this.healthy = healthy;
       this.unhealthyFile = unhealthyFile;
       this.failureType = failureType;
@@ -77,7 +76,7 @@ public interface Container<CONTAINERDATA extends ContainerData> {
       return new ScanResult(true, null, null, null);
     }
 
-    public static ScanResult unhealthy(FailureType type, File failingFile,
+    public static ScanResult unhealthy(FailureType type, Path failingFile,
         Throwable exception) {
       return new ScanResult(false, type, failingFile, exception);
     }
@@ -86,7 +85,7 @@ public interface Container<CONTAINERDATA extends ContainerData> {
       return healthy;
     }
 
-    public File getUnhealthyFile() {
+    public Path getUnhealthyFile() {
       return unhealthyFile;
     }
 
