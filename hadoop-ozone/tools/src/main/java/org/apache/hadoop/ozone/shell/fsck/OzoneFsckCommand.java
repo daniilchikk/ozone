@@ -31,6 +31,8 @@ import org.kohsuke.MetaInfServices;
 import picocli.CommandLine;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.Writer;
 
 /**
  * The {@link OzoneFsckCommand} class is a command-line tool for performing file system checks within Ozone.
@@ -117,7 +119,21 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
 
   @Override
   protected void execute(OzoneClient client, OzoneAddress address) throws IOException, OzoneClientException {
-    throw new UnsupportedOperationException("Not implemented yet");
+    OzoneFsckVerboseSettings verboseSettings = new OzoneFsckVerboseSettings();
+
+    OzoneConfiguration ozoneConfiguration = getConf();
+
+    try (Writer writer = new PrintWriter(System.out);
+         OzoneFsckHandler handler =
+             new OzoneFsckHandler(address, verboseSettings, writer, delete, client, ozoneConfiguration)) {
+      try {
+        handler.scan();
+      } finally {
+        writer.flush();
+      }
+    } catch (Exception e) {
+      throw new IOException("Can't execute fscheck command", e);
+    }
   }
 
   @Override
