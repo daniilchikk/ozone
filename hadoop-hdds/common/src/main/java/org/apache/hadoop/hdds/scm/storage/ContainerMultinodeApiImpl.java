@@ -24,7 +24,6 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerC
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
 
@@ -40,14 +39,26 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
 
   private final XceiverClientSpi client;
 
+  private final ContainerApiHelper requestHelper = new ContainerApiHelper();
+
   public ContainerMultinodeApiImpl(XceiverClientSpi client) {
     this.client = client;
   }
 
   @Override
   public Map<DatanodeDetails, VerifyBlockResponseProto> verifyBlock(DatanodeBlockID datanodeBlockID,
-      Token<OzoneBlockTokenIdentifier> token) {
-    throw new UnsupportedOperationException("Not yet implemented");
+      Token<OzoneBlockTokenIdentifier> token) throws IOException, InterruptedException {
+
+    String datanodeUuid = client.getPipeline().getFirstNode().getUuidString();
+
+    Map<DatanodeDetails, VerifyBlockResponseProto> datanodeToResponseMap = new HashMap<>();
+
+    ContainerCommandRequestProto request = requestHelper.createVerifyBlockRequest(datanodeBlockID, token, datanodeUuid);
+    Map<DatanodeDetails, ContainerCommandResponseProto> responses = client.sendCommandOnAllNodes(request);
+
+    responses.forEach((key, value) -> datanodeToResponseMap.put(key, value.getVerifyBlock()));
+
+    return datanodeToResponseMap;
   }
 
   @Override
