@@ -268,6 +268,8 @@ public class KeyValueHandler extends Handler {
       return handler.handleFinalizeBlock(request, kvContainer);
     case Echo:
       return handler.handleEcho(request);
+    case VerifyBlock:
+      return handler.handleVerifyBlock(request, kvContainer);
     default:
       return null;
     }
@@ -1347,6 +1349,11 @@ public class KeyValueHandler extends Handler {
       }
     }
     return null;
+  }
+
+  private ContainerCommandResponseProto handleVerifyBlock(ContainerCommandRequestProto request,
+      KeyValueContainer kvContainer) {
+    throw new UnsupportedOperationException("Unimplemented yet.");
   }
 
   public static Logger getLogger() {

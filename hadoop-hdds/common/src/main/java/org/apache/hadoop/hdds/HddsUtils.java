@@ -386,6 +386,7 @@ public final class HddsUtils {
     case ListContainer:
     case ListChunk:
     case GetCommittedBlockLength:
+    case VerifyBlock:
       return true;
     case CloseContainer:
     case WriteChunk:
@@ -438,6 +439,7 @@ public final class HddsUtils {
     case ReadChunk:
     case WriteChunk:
     case FinalizeBlock:
+    case VerifyBlock:
       return true;
     default:
       return false;
@@ -527,6 +529,11 @@ public final class HddsUtils {
     case FinalizeBlock:
       if (msg.hasFinalizeBlock()) {
         blockID = msg.getFinalizeBlock().getBlockID();
+      }
+      break;
+    case VerifyBlock:
+      if (msg.hasVerifyBlock()) {
+        blockID = msg.getVerifyBlock().getBlockID();
       }
       break;
     default:

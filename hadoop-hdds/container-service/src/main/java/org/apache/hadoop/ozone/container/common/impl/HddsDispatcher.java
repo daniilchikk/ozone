@@ -815,6 +815,8 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
       return DNAction.FINALIZE_BLOCK;
     case Echo:
       return DNAction.ECHO;
+    case VerifyBlock:
+      return DNAction.VERIFY_BLOCK;
     default:
       LOG.debug("Invalid command type - {}", cmdType);
       return null;
@@ -931,6 +933,11 @@ public class HddsDispatcher implements ContainerDispatcher, Auditor {
           BlockID.getFromProtobuf(msg.getFinalizeBlock().getBlockID())
               .toString());
       return auditParams;
+
+    case VerifyBlock:
+      auditParams.put(
+          "verifyBlock",
+          BlockID.getFromProtobuf(msg.getVerifyBlock().getBlockID()).toString());
 
     default :
       LOG.debug("Invalid command type - {}", cmdType);

@@ -198,17 +198,9 @@ public final class ContainerProtocolCalls  {
   private static GetBlockResponseProto getBlock(XceiverClientSpi xceiverClient, List<Validator> validators,
       ContainerCommandRequestProto.Builder builder, BlockID blockID, DatanodeDetails datanode,
       Map<DatanodeDetails, Integer> replicaIndexes) throws IOException {
-    String traceId = TracingUtil.exportCurrentSpan();
-    if (traceId != null) {
-      builder.setTraceID(traceId);
-    }
-    final DatanodeBlockID.Builder datanodeBlockID = blockID.getDatanodeBlockIDProtobufBuilder();
-    int replicaIndex = replicaIndexes.getOrDefault(datanode, 0);
-    if (replicaIndex > 0) {
-      datanodeBlockID.setReplicaIndex(replicaIndex);
-    }
+    DatanodeBlockID datanodeBlockID = buildDatanodeId(builder, blockID, datanode, replicaIndexes);
     final GetBlockRequestProto.Builder readBlockRequest = GetBlockRequestProto.newBuilder()
-        .setBlockID(datanodeBlockID.build());
+        .setBlockID(datanodeBlockID);
     final ContainerCommandRequestProto request = builder
         .setDatanodeUuid(datanode.getUuidString())
         .setGetBlock(readBlockRequest).build();
@@ -851,5 +843,20 @@ public final class ContainerProtocolCalls  {
     }
 
     return request.build();
+  }
+
+  private static DatanodeBlockID buildDatanodeId(ContainerCommandRequestProto.Builder builder, BlockID blockID,
+      DatanodeDetails datanode, Map<DatanodeDetails, Integer> replicaIndexes) {
+    String traceId = TracingUtil.exportCurrentSpan();
+    if (traceId != null) {
+      builder.setTraceID(traceId);
+    }
+    final DatanodeBlockID.Builder datanodeBlockID = blockID.getDatanodeBlockIDProtobufBuilder();
+    int replicaIndex = replicaIndexes.getOrDefault(datanode, 0);
+    if (replicaIndex > 0) {
+      datanodeBlockID.setReplicaIndex(replicaIndex);
+    }
+
+    return datanodeBlockID.build();
   }
 }
