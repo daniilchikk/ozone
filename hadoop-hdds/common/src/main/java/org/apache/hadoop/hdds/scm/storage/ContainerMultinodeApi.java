@@ -20,11 +20,9 @@ package org.apache.hadoop.hdds.scm.storage;
 
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
-import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
-import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map;
 
@@ -33,15 +31,9 @@ import java.util.Map;
  * Provides methods to perform any protocol calls by Container clients on multiple datanodes.
  */
 public interface ContainerMultinodeApi extends AutoCloseable {
-  /**
-   * Verifies the specified block on multiple datanodes.
-   *
-   * @param datanodeBlockID the ID of the block to be verified
-   * @param token the security token required for block verification
-   * @return a map containing the datanode details and their respective verification response
-   * @throws IOException if an I/O error occurs during verification
-   * @throws InterruptedException if the verification process is interrupted
-   */
-  Map<DatanodeDetails, VerifyBlockResponseProto> verifyBlock(DatanodeBlockID datanodeBlockID,
-    Token<OzoneBlockTokenIdentifier> token) throws IOException, InterruptedException;
+  Map<DatanodeDetails, GetBlockResponseProto> getBlock(DatanodeBlockID datanodeBlockId)
+      throws IOException, InterruptedException;
+
+  Map<DatanodeDetails, ReadContainerResponseProto> readContainer(long containerId)
+      throws IOException, InterruptedException;
 }

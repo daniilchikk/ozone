@@ -21,51 +21,64 @@ package org.apache.hadoop.hdds.scm.storage;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockRequestProto;
-import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerRequestProto;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
-import org.apache.hadoop.security.token.Token;
 
-import java.io.IOException;
+import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.GetBlock;
+import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.ReadContainer;
 
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.VerifyBlock;
 
 /**
  * Class designed working with Datanode Proto requests and responses.
  */
 class ContainerApiHelper {
-  /**
-   * Creates a request to verify a block on the datanode.
-   *
-   * @param datanodeBlockID The identifier for the block on the datanode.
-   * @param token The security token used for authentication.
-   * @param datanodeUuid The unique identifier of the datanode.
-   * @return A {@link ContainerCommandRequestProto} object representing the verify block request.
-   * @throws IOException If an I/O error occurs during the request creation.
-   */
-  ContainerCommandRequestProto createVerifyBlockRequest(DatanodeBlockID datanodeBlockID,
-      Token<OzoneBlockTokenIdentifier> token, String datanodeUuid) throws IOException {
+  private final String datanodeUuid;
 
-    VerifyBlockRequestProto.Builder verifyBlockRequestBuilder = ContainerProtos.VerifyBlockRequestProto
-        .newBuilder()
-        .setBlockID(datanodeBlockID);
+  ContainerApiHelper(String datanodeUuid) {
+    this.datanodeUuid = datanodeUuid;
+  }
 
-    ContainerCommandRequestProto.Builder commandRequestBuilder = ContainerCommandRequestProto
+  ContainerCommandRequestProto createGetBlockRequest(DatanodeBlockID datanodeBlockId, String token) {
+    ContainerProtos.GetBlockRequestProto.Builder readBlockRequest = ContainerProtos.GetBlockRequestProto
         .newBuilder()
-        .setCmdType(VerifyBlock)
-        .setContainerID(datanodeBlockID.getContainerID())
-        .setDatanodeUuid(datanodeUuid)
-        .setVerifyBlock(verifyBlockRequestBuilder);
+        .setBlockID(datanodeBlockId);
+
+    long containerId = datanodeBlockId.getContainerID();
+
+    ContainerCommandRequestProto.Builder containerCommandBuilder =
+        createContainerCommandRequestBuilder(GetBlock, containerId, token);
+
+    containerCommandBuilder.setGetBlock(readBlockRequest);
+
+    return containerCommandBuilder.build();
+  }
+
+  ContainerCommandRequestProto createReadContainerRequest(long containerId, String token) {
+    ContainerCommandRequestProto.Builder containerCommandBuilder =
+        createContainerCommandRequestBuilder(ReadContainer, containerId, token);
+
+    containerCommandBuilder.setReadContainer(ReadContainerRequestProto.getDefaultInstance());
+
+    return containerCommandBuilder.build();
+  }
+
+  private ContainerCommandRequestProto.Builder createContainerCommandRequestBuilder(ContainerProtos.Type type,
+      long containerId, String token) {
+
+    ContainerCommandRequestProto.Builder containerCommandBuilder = ContainerCommandRequestProto.newBuilder()
+        .setCmdType(type)
+        .setContainerID(containerId)
+        .setDatanodeUuid(datanodeUuid);
 
     if (token != null) {
-      commandRequestBuilder.setEncodedToken(token.encodeToUrlString());
+      containerCommandBuilder.setEncodedToken(token);
     }
 
     String traceId = TracingUtil.exportCurrentSpan();
     if (traceId != null) {
-      commandRequestBuilder.setTraceID(traceId);
+      containerCommandBuilder.setTraceID(traceId);
     }
 
-    return commandRequestBuilder.build();
+    return containerCommandBuilder;
   }
 }

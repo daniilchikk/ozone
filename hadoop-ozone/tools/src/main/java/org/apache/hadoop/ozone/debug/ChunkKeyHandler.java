@@ -32,12 +32,15 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerMultinodeApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerMultinodeApiImpl;
 import org.apache.hadoop.hdds.server.JsonUtils;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.client.OzoneClient;
@@ -83,11 +86,14 @@ public class ChunkKeyHandler extends KeyHandler implements
       String volumeName = address.getVolumeName();
       String bucketName = address.getBucketName();
       String keyName = address.getKeyName();
-      List<ContainerProtos.ChunkInfo> tempchunks;
+      List<ChunkInfo> tempchunks;
       List<ChunkDetails> chunkDetailsList = new ArrayList<>();
       HashSet<String> chunkPaths = new HashSet<>();
       OmKeyArgs keyArgs = new OmKeyArgs.Builder().setVolumeName(volumeName)
-          .setBucketName(bucketName).setKeyName(keyName).build();
+          .setBucketName(bucketName)
+          .setKeyName(keyName)
+          .build();
+
       OmKeyInfo keyInfo = ozoneManagerClient.lookupKey(keyArgs);
       // querying  the keyLocations.The OM is queried to get containerID and
       // localID pertaining to a given key
@@ -107,11 +113,9 @@ public class ChunkKeyHandler extends KeyHandler implements
         long containerId = keyLocation.getContainerID();
         chunkPaths.clear();
         Pipeline keyPipeline = keyLocation.getPipeline();
-        boolean isECKey =
-            keyPipeline.getReplicationConfig().getReplicationType() ==
-                HddsProtos.ReplicationType.EC;
+        boolean isECKey = keyPipeline.getReplicationConfig().getReplicationType() == ReplicationType.EC;
         Pipeline pipeline;
-        if (!isECKey && keyPipeline.getType() != HddsProtos.ReplicationType.STAND_ALONE) {
+        if (!isECKey && keyPipeline.getType() != ReplicationType.STAND_ALONE) {
           pipeline = Pipeline.newBuilder(keyPipeline)
               .setReplicationConfig(StandaloneReplicationConfig
                   .getInstance(ONE)).build();
@@ -119,22 +123,20 @@ public class ChunkKeyHandler extends KeyHandler implements
           pipeline = keyPipeline;
         }
         XceiverClientSpi xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
-        try {
+        try (ContainerMultinodeApi containerClient =
+                 new ContainerMultinodeApiImpl(xceiverClient, keyLocation.getToken())) {
           // Datanode is queried to get chunk information.Thus querying the
           // OM,SCM and datanode helps us get chunk location information
-          ContainerProtos.DatanodeBlockID datanodeBlockID =
-              keyLocation.getBlockID().getDatanodeBlockIDProtobuf();
+          DatanodeBlockID datanodeBlockId = keyLocation.getBlockID().getDatanodeBlockIDProtobuf();
+
           // doing a getBlock on all nodes
-          Map<DatanodeDetails, ContainerProtos.GetBlockResponseProto>
-              responses =
-              ContainerProtocolCalls.getBlockFromAllNodes(xceiverClient,
-                  keyLocation.getBlockID().getDatanodeBlockIDProtobuf(),
-                  keyLocation.getToken());
-          Map<DatanodeDetails, ContainerProtos.ReadContainerResponseProto> readContainerResponses =
-              containerOperationClient.readContainerFromAllNodes(
-                  keyLocation.getContainerID(), pipeline);
+          Map<DatanodeDetails, GetBlockResponseProto> getBlockResponses = containerClient.getBlock(datanodeBlockId);
+
+          Map<DatanodeDetails, ReadContainerResponseProto> readContainerResponses =
+              containerClient.readContainer(containerId);
+
           ArrayNode responseFromAllNodes = JsonUtils.createArrayNode();
-          for (Map.Entry<DatanodeDetails, ContainerProtos.GetBlockResponseProto> entry : responses.entrySet()) {
+          for (Map.Entry<DatanodeDetails, GetBlockResponseProto> entry : getBlockResponses.entrySet()) {
             chunkPaths.clear();
             ObjectNode jsonObj = JsonUtils.createObjectNode(null);
             if (entry.getValue() == null) {
@@ -142,9 +144,9 @@ public class ChunkKeyHandler extends KeyHandler implements
               continue;
             }
             tempchunks = entry.getValue().getBlockData().getChunksList();
-            ContainerProtos.ContainerDataProto containerData =
+            ContainerDataProto containerData =
                 readContainerResponses.get(entry.getKey()).getContainerData();
-            for (ContainerProtos.ChunkInfo chunkInfo : tempchunks) {
+            for (ChunkInfo chunkInfo : tempchunks) {
               String fileName = containerLayoutVersion.getChunkFile(new File(
                       getChunkLocationPath(containerData.getContainerPath())),
                   keyLocation.getBlockID(),
@@ -183,7 +185,7 @@ public class ChunkKeyHandler extends KeyHandler implements
             responseFromAllNodes.add(jsonObj);
           }
           responseArrayList.add(responseFromAllNodes);
-        } catch (InterruptedException e) {
+        } catch (Exception e) {
           throw new RuntimeException(e);
         } finally {
           xceiverClientManager.releaseClientForReadData(xceiverClient, false);
@@ -198,13 +200,11 @@ public class ChunkKeyHandler extends KeyHandler implements
   private boolean isECParityBlock(Pipeline pipeline, DatanodeDetails dn) {
     //index is 1-based,
     //e.g. for RS-3-2 we will have data indexes 1,2,3 and parity indexes 4,5
-    return pipeline.getReplicaIndex(dn) >
-        ((ECReplicationConfig) pipeline.getReplicationConfig()).getData();
+    return pipeline.getReplicaIndex(dn) > ((ECReplicationConfig) pipeline.getReplicationConfig()).getData();
   }
 
   @Override
   public Class<?> getParentType() {
     return OzoneDebug.class;
   }
-
 }

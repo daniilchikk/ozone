@@ -376,25 +376,6 @@ public class ContainerOperationClient implements ScmClient {
     }
   }
 
-  public Map<DatanodeDetails, ReadContainerResponseProto>
-      readContainerFromAllNodes(long containerID, Pipeline pipeline)
-      throws IOException, InterruptedException {
-    XceiverClientManager clientManager = getXceiverClientManager();
-    String encodedToken = getEncodedContainerToken(containerID);
-    XceiverClientSpi client = null;
-    try {
-      client = clientManager.acquireClientForReadData(pipeline);
-      Map<DatanodeDetails, ReadContainerResponseProto> responses =
-          ContainerProtocolCalls.readContainerFromAllNodes(client, containerID,
-              encodedToken);
-      return responses;
-    } finally {
-      if (client != null) {
-        clientManager.releaseClient(client, false);
-      }
-    }
-  }
-
   @Override
   public ContainerDataProto readContainer(long containerID) throws IOException {
     ContainerWithPipeline info = getContainerWithPipeline(containerID);

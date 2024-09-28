@@ -19,17 +19,10 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
-
 /**
  * Interface for communication with a datanode.
  * Provides methods to perform any protocol calls by Container clients on a single datanode.
  */
 public interface ContainerApi extends AutoCloseable {
-  /**
-   * Verifies the integrity and validity of a block within the container.
-   *
-   * @return a VerifyBlockResponseProto object containing the result of the block verification operation.
-   */
-  VerifyBlockResponseProto verifyBlock();
+
 }

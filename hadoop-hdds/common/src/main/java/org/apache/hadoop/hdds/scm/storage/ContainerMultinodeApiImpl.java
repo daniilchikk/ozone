@@ -18,18 +18,16 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of the {@link ContainerMultinodeApi} interface.
@@ -39,26 +37,50 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
 
   private final XceiverClientSpi client;
 
-  private final ContainerApiHelper requestHelper = new ContainerApiHelper();
+  private final String token;
 
-  public ContainerMultinodeApiImpl(XceiverClientSpi client) {
+  private final ContainerApiHelper requestHelper;
+
+  public ContainerMultinodeApiImpl(XceiverClientSpi client, @Nullable Token<OzoneBlockTokenIdentifier> token)
+      throws IOException {
     this.client = client;
+
+    if (token != null) {
+      this.token = token.encodeToUrlString();
+    } else {
+      this.token = null;
+    }
+
+    String firstDatanodeUuid = client.getPipeline().getFirstNode().getUuidString();
+    this.requestHelper = new ContainerApiHelper(firstDatanodeUuid);
   }
 
   @Override
-  public Map<DatanodeDetails, VerifyBlockResponseProto> verifyBlock(DatanodeBlockID datanodeBlockID,
-      Token<OzoneBlockTokenIdentifier> token) throws IOException, InterruptedException {
+  public Map<DatanodeDetails, GetBlockResponseProto> getBlock(DatanodeBlockID datanodeBlockId) throws IOException, InterruptedException {
 
-    String datanodeUuid = client.getPipeline().getFirstNode().getUuidString();
+    ContainerCommandRequestProto request =
+        requestHelper.createGetBlockRequest(datanodeBlockId, token);
 
-    Map<DatanodeDetails, VerifyBlockResponseProto> datanodeToResponseMap = new HashMap<>();
+    return client.sendCommandOnAllNodes(request)
+        .entrySet()
+        .stream()
+        .collect(Collectors.toMap(
+            Map.Entry::getKey,
+            e -> e.getValue().getGetBlock()
+        ));
+  }
 
-    ContainerCommandRequestProto request = requestHelper.createVerifyBlockRequest(datanodeBlockID, token, datanodeUuid);
-    Map<DatanodeDetails, ContainerCommandResponseProto> responses = client.sendCommandOnAllNodes(request);
+  @Override
+  public Map<DatanodeDetails, ReadContainerResponseProto> readContainer(long containerId) throws IOException, InterruptedException {
+    ContainerCommandRequestProto request = requestHelper.createReadContainerRequest(containerId, token);
 
-    responses.forEach((key, value) -> datanodeToResponseMap.put(key, value.getVerifyBlock()));
-
-    return datanodeToResponseMap;
+    return client.sendCommandOnAllNodes(request)
+        .entrySet()
+        .stream()
+        .collect(Collectors.toMap(
+            Map.Entry::getKey,
+            e -> e.getValue().getReadContainer()
+        ));
   }
 
   @Override
