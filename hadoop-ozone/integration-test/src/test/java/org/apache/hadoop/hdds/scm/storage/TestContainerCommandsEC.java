@@ -324,13 +324,15 @@ public class TestContainerCommandsEC {
         .addCommand(deleteBlocksCommand);
 
     try (XceiverClientGrpc client = new XceiverClientGrpc(
-        createSingleNodePipeline(orphanPipeline, dn2, 1), cluster.getConf())) {
+        createSingleNodePipeline(orphanPipeline, dn2, 1), cluster.getConf());
+         ContainerApi containerClient = new ContainerApiImpl(client, orphanContainerToken)
+    ) {
       // Wait for the block to be actually deleted
       GenericTestUtils.waitFor(() -> {
         try {
-          ListBlockResponseProto response = ContainerProtocolCalls
-              .listBlock(client, orphanContainerID, null, Integer.MAX_VALUE,
-                  orphanContainerToken);
+          ListBlockResponseProto response =
+              containerClient.listBlock( orphanContainerID, null, Integer.MAX_VALUE);
+
           for (BlockData bd : response.getBlockDataList()) {
             if (bd.getBlockID().getLocalID() == localID) {
               return false;
@@ -380,12 +382,14 @@ public class TestContainerCommandsEC {
     // Check the block listing for the recovered containers 4 or 5 and they
     // should be present but with no blocks as the only block in the container
     // was an orphan block.
-    try (XceiverClientGrpc reconClient = new XceiverClientGrpc(
-        createSingleNodePipeline(orphanPipeline, targetNodeMap.get(4), 4),
-        cluster.getConf())) {
-      ListBlockResponseProto response = ContainerProtocolCalls
-          .listBlock(reconClient, orphanContainerID, null, Integer.MAX_VALUE,
-              orphanContainerToken);
+    try (XceiverClientGrpc reconClient =
+             new XceiverClientGrpc(createSingleNodePipeline(orphanPipeline, targetNodeMap.get(4), 4),
+                 cluster.getConf());
+         ContainerApi containerClient = new ContainerApiImpl(reconClient, orphanContainerToken)
+    ) {
+      ListBlockResponseProto response =
+          containerClient.listBlock(orphanContainerID, null, Integer.MAX_VALUE);
+
       long count = response.getBlockDataList().stream()
           .filter(bd -> bd.getBlockID().getLocalID() == localID)
           .count();
@@ -419,27 +423,28 @@ public class TestContainerCommandsEC {
       if (minNumExpectedBlocks == 0) {
         final int j = i;
         Throwable t = assertThrows(StorageContainerException.class,
-            () -> ContainerProtocolCalls
-                .listBlock(clients.get(j), containerID, null,
-                    minNumExpectedBlocks + 1, containerToken));
-        assertEquals("ContainerID " + containerID + " does not exist",
-                t.getMessage());
+            () -> {
+              try (ContainerApi containerClient = new ContainerApiImpl(clients.get(j), containerToken)) {
+                containerClient.listBlock(containerID, null, minNumExpectedBlocks + 1);
+              }
+            });
+        assertEquals("ContainerID " + containerID + " does not exist", t.getMessage());
         continue;
       }
-      ListBlockResponseProto response = ContainerProtocolCalls
-          .listBlock(clients.get(i), containerID, null, Integer.MAX_VALUE,
-              containerToken);
-      assertThat(minNumExpectedBlocks)
-          .withFailMessage("blocks count should be same or more than min expected" +
-               " blocks count on DN " + i)
-          .isLessThanOrEqualTo(response.getBlockDataList().stream().filter(
-              k -> k.getChunksCount() > 0 && k.getChunks(0).getLen() > 0)
-              .collect(Collectors.toList()).size());
-      assertThat(minNumExpectedChunks)
-          .withFailMessage("chunks count should be same or more than min expected" +
-              " chunks count on DN " + i)
-          .isLessThanOrEqualTo(response.getBlockDataList().stream()
-              .mapToInt(BlockData::getChunksCount).sum());
+      try (ContainerApi containerClient = new ContainerApiImpl(clients.get(i), containerToken)) {
+        ListBlockResponseProto response = containerClient.listBlock(containerID, null, Integer.MAX_VALUE);
+
+        assertThat(minNumExpectedBlocks)
+            .withFailMessage("blocks count should be same or more than min expected blocks count on DN "
+                + i)
+            .isLessThanOrEqualTo((int) response.getBlockDataList().stream()
+                .filter(k -> k.getChunksCount() > 0 && k.getChunks(0).getLen() > 0).count());
+        assertThat(minNumExpectedChunks)
+            .withFailMessage("chunks count should be same or more than min expected chunks count on DN "
+                + i)
+            .isLessThanOrEqualTo(response.getBlockDataList().stream()
+                .mapToInt(BlockData::getChunksCount).sum());
+      }
     }
   }
 

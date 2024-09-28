@@ -19,10 +19,17 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
+
+import java.io.IOException;
+
 /**
  * Interface for communication with a datanode.
  * Provides methods to perform any protocol calls by Container clients on a single datanode.
  */
 public interface ContainerApi extends AutoCloseable {
+  ListBlockResponseProto listBlock(long containerId, Long startLocalId, int count) throws IOException;
 
+  @Override
+  void close();
 }

@@ -185,7 +185,7 @@ public class ChunkKeyHandler extends KeyHandler implements
             responseFromAllNodes.add(jsonObj);
           }
           responseArrayList.add(responseFromAllNodes);
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
           throw new RuntimeException(e);
         } finally {
           xceiverClientManager.releaseClientForReadData(xceiverClient, false);

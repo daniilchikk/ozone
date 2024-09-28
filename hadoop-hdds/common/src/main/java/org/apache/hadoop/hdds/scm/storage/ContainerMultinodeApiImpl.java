@@ -37,29 +37,22 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
 
   private final XceiverClientSpi client;
 
-  private final String token;
-
   private final ContainerApiHelper requestHelper;
 
   public ContainerMultinodeApiImpl(XceiverClientSpi client, @Nullable Token<OzoneBlockTokenIdentifier> token)
       throws IOException {
     this.client = client;
 
-    if (token != null) {
-      this.token = token.encodeToUrlString();
-    } else {
-      this.token = null;
-    }
-
     String firstDatanodeUuid = client.getPipeline().getFirstNode().getUuidString();
-    this.requestHelper = new ContainerApiHelper(firstDatanodeUuid);
+    this.requestHelper = new ContainerApiHelper(firstDatanodeUuid, token);
   }
 
   @Override
-  public Map<DatanodeDetails, GetBlockResponseProto> getBlock(DatanodeBlockID datanodeBlockId) throws IOException, InterruptedException {
+  public Map<DatanodeDetails, GetBlockResponseProto> getBlock(DatanodeBlockID datanodeBlockId)
+      throws IOException, InterruptedException {
 
     ContainerCommandRequestProto request =
-        requestHelper.createGetBlockRequest(datanodeBlockId, token);
+        requestHelper.createGetBlockRequest(datanodeBlockId);
 
     return client.sendCommandOnAllNodes(request)
         .entrySet()
@@ -71,8 +64,10 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
   }
 
   @Override
-  public Map<DatanodeDetails, ReadContainerResponseProto> readContainer(long containerId) throws IOException, InterruptedException {
-    ContainerCommandRequestProto request = requestHelper.createReadContainerRequest(containerId, token);
+  public Map<DatanodeDetails, ReadContainerResponseProto> readContainer(long containerId)
+      throws IOException, InterruptedException {
+
+    ContainerCommandRequestProto request = requestHelper.createReadContainerRequest(containerId);
 
     return client.sendCommandOnAllNodes(request)
         .entrySet()
@@ -84,7 +79,7 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
   }
 
   @Override
-  public void close() throws IOException {
+  public void close() {
     client.close();
   }
 }

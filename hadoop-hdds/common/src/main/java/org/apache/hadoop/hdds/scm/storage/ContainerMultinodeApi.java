@@ -36,4 +36,7 @@ public interface ContainerMultinodeApi extends AutoCloseable {
 
   Map<DatanodeDetails, ReadContainerResponseProto> readContainer(long containerId)
       throws IOException, InterruptedException;
+
+  @Override
+  void close();
 }

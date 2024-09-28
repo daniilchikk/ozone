@@ -18,14 +18,19 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerRequestProto;
+import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
+import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.TokenIdentifier;
 
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.GetBlock;
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.ReadContainer;
+import java.io.IOException;
+
+import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.*;
 
 
 /**
@@ -34,11 +39,37 @@ import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Typ
 class ContainerApiHelper {
   private final String datanodeUuid;
 
-  ContainerApiHelper(String datanodeUuid) {
+  private final String token;
+
+  ContainerApiHelper(String datanodeUuid, @Nullable Token<? extends TokenIdentifier> token) throws IOException {
     this.datanodeUuid = datanodeUuid;
+
+    if (token != null) {
+      this.token = token.encodeToUrlString();
+    } else {
+      this.token = null;
+    }
   }
 
-  ContainerCommandRequestProto createGetBlockRequest(DatanodeBlockID datanodeBlockId, String token) {
+  ContainerCommandRequestProto createListBlockRequest(long containerId, Long startLocalId, int count) {
+    ContainerProtos.ListBlockRequestProto.Builder listBlockBuilder = ContainerProtos.ListBlockRequestProto.newBuilder()
+        .setCount(count);
+
+    if (startLocalId != null) {
+      listBlockBuilder.setStartLocalID(startLocalId);
+    }
+
+    ContainerCommandRequestProto.Builder containerCommandBuilder =
+        createContainerCommandRequestBuilder(ListBlock, containerId);
+
+    containerCommandBuilder
+            .setContainerID(containerId)
+            .setListBlock(listBlockBuilder.build());
+
+    return containerCommandBuilder.build();
+  }
+
+  ContainerCommandRequestProto createGetBlockRequest(DatanodeBlockID datanodeBlockId) {
     ContainerProtos.GetBlockRequestProto.Builder readBlockRequest = ContainerProtos.GetBlockRequestProto
         .newBuilder()
         .setBlockID(datanodeBlockId);
@@ -46,16 +77,16 @@ class ContainerApiHelper {
     long containerId = datanodeBlockId.getContainerID();
 
     ContainerCommandRequestProto.Builder containerCommandBuilder =
-        createContainerCommandRequestBuilder(GetBlock, containerId, token);
+        createContainerCommandRequestBuilder(GetBlock, containerId);
 
     containerCommandBuilder.setGetBlock(readBlockRequest);
 
     return containerCommandBuilder.build();
   }
 
-  ContainerCommandRequestProto createReadContainerRequest(long containerId, String token) {
+  ContainerCommandRequestProto createReadContainerRequest(long containerId) {
     ContainerCommandRequestProto.Builder containerCommandBuilder =
-        createContainerCommandRequestBuilder(ReadContainer, containerId, token);
+        createContainerCommandRequestBuilder(ReadContainer, containerId);
 
     containerCommandBuilder.setReadContainer(ReadContainerRequestProto.getDefaultInstance());
 
@@ -63,7 +94,7 @@ class ContainerApiHelper {
   }
 
   private ContainerCommandRequestProto.Builder createContainerCommandRequestBuilder(ContainerProtos.Type type,
-      long containerId, String token) {
+      long containerId) {
 
     ContainerCommandRequestProto.Builder containerCommandBuilder = ContainerCommandRequestProto.newBuilder()
         .setCmdType(type)

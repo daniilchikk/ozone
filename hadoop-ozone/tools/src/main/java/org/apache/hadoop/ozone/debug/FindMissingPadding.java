@@ -32,6 +32,8 @@ import org.apache.hadoop.hdds.scm.container.ContainerReplicaInfo;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdds.utils.HAUtils;
@@ -238,9 +240,10 @@ public class FindMissingPadding extends Handler implements SubcommandWithParent 
               .setNodes(Collections.singletonList(replica.getDatanodeDetails()))
               .build();
           XceiverClientSpi datanodeClient = xceiverClientManager.acquireClientForReadData(pipeline);
-          try {
-            ContainerProtos.ListBlockResponseProto listBlockResponse = ContainerProtocolCalls.listBlock(
-                datanodeClient, containerID, null, Integer.MAX_VALUE, token);
+          try (ContainerApi containerClient = new ContainerApiImpl(datanodeClient, token)) {
+            ContainerProtos.ListBlockResponseProto listBlockResponse =
+                containerClient.listBlock(containerID, null, Integer.MAX_VALUE);
+
             for (ContainerProtos.BlockData blockData : listBlockResponse.getBlockDataList()) {
               missingBlocks.remove(blockData.getBlockID().getLocalID());
             }

@@ -28,6 +28,8 @@ import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClient;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
@@ -80,27 +82,23 @@ public class ECContainerOperationClient implements Closeable {
     return new XceiverClientManager(conf, scmClientConfig, trustManager);
   }
 
-  public BlockData[] listBlock(long containerId, DatanodeDetails dn,
-      ECReplicationConfig repConfig, Token<? extends TokenIdentifier> token)
-      throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager
-        .acquireClient(singleNodePipeline(dn, repConfig));
-    try {
-      List<ContainerProtos.BlockData> blockDataList = ContainerProtocolCalls
-          .listBlock(xceiverClient, containerId, null, Integer.MAX_VALUE, token)
+  public BlockData[] listBlock(long containerId, DatanodeDetails dn, ECReplicationConfig repConfig,
+      Token<? extends TokenIdentifier> token) throws IOException {
+    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(dn, repConfig));
+
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
+      List<ContainerProtos.BlockData> blockDataList = containerClient
+          .listBlock(containerId, null, Integer.MAX_VALUE)
           .getBlockDataList();
       return blockDataList.stream().map(i -> {
         try {
           return BlockData.getFromProtoBuf(i);
         } catch (IOException e) {
-          LOG.debug("Failed while converting to protobuf BlockData. Returning"
-                  + " null for listBlock from DN: " + dn,
-              e);
+          LOG.debug("Failed while converting to protobuf BlockData. Returning null for listBlock from DN: {}", dn, e);
           // TODO: revisit here.
           return null;
         }
-      }).collect(Collectors.toList())
-          .toArray(new BlockData[blockDataList.size()]);
+      }).toArray(BlockData[]::new);
     } finally {
       this.xceiverClientManager.releaseClient(xceiverClient, false);
     }
