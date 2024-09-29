@@ -159,6 +159,7 @@ public class ECReconstructionCoordinator implements Closeable {
     // 1. create target recovering containers.
     String containerToken = encode(tokenHelper.getContainerToken(cid));
     List<DatanodeDetails> recoveringContainersCreatedDNs = new ArrayList<>();
+
     try {
       for (Map.Entry<Integer, DatanodeDetails> indexDnPair : targetNodeMap
           .entrySet()) {
@@ -167,8 +168,7 @@ public class ECReconstructionCoordinator implements Closeable {
         LOG.debug("Creating container {} on datanode {} for index {}",
             containerID, dn, index);
         containerOperationClient
-            .createRecoveringContainer(containerID, dn, repConfig,
-                containerToken, index);
+            .createRecoveringContainer(containerID, dn, repConfig, tokenHelper.getContainerToken(cid), index);
         recoveringContainersCreatedDNs.add(dn);
       }
 

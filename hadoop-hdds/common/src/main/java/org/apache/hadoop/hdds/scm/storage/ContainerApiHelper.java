@@ -24,8 +24,12 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
+import org.apache.hadoop.ozone.common.Checksum;
+import org.apache.hadoop.ozone.common.ChecksumData;
+import org.apache.hadoop.ozone.common.OzoneChecksumException;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
+import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 
 import java.io.IOException;
 import java.util.Map;
@@ -149,6 +153,34 @@ class ContainerApiHelper {
 
     return createContainerCommandRequestBuilder(PutBlock, blockId.getContainerID())
         .setReadChunk(readChunkRequest)
+        .build();
+  }
+
+  public ContainerCommandRequestProto createWriteChunkRequest(ChunkInfo chunk, BlockID blockId, ByteString data,
+      int replicationIndex, BlockData blockData, boolean close) {
+    long containerId = blockId.getContainerID();
+
+    WriteChunkRequestProto.Builder writeChunkRequest =
+        WriteChunkRequestProto.newBuilder()
+            .setBlockID(DatanodeBlockID.newBuilder()
+                .setContainerID(containerId)
+                .setLocalID(blockId.getLocalID())
+                .setBlockCommitSequenceId(blockId.getBlockCommitSequenceId())
+                .setReplicaIndex(replicationIndex)
+                .build())
+            .setChunkData(chunk)
+            .setData(data);
+
+    if (blockData != null) {
+      PutBlockRequestProto.Builder createBlockRequest =
+          PutBlockRequestProto.newBuilder()
+              .setBlockData(blockData)
+              .setEof(close);
+      writeChunkRequest.setBlock(createBlockRequest);
+    }
+
+    return createContainerCommandRequestBuilder(WriteChunk, containerId)
+        .setWriteChunk(writeChunkRequest.build())
         .build();
   }
 

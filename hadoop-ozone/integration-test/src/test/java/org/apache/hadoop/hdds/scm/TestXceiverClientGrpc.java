@@ -24,6 +24,7 @@ import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.NodeOperationalState;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
@@ -252,20 +253,21 @@ public class TestXceiverClientGrpc {
 
   private void invokeXceiverClientReadChunk(XceiverClientSpi client)
       throws IOException {
-    BlockID bid = new BlockID(1, 1);
-    bid.setBlockCommitSequenceId(1);
-    ContainerProtocolCalls.readChunk(client,
-        ContainerProtos.ChunkInfo.newBuilder()
-            .setChunkName("Anything")
-            .setChecksumData(ContainerProtos.ChecksumData.newBuilder()
-                .setBytesPerChecksum(512)
-                .setType(ContainerProtos.ChecksumType.CRC32)
-                .build())
-            .setLen(-1)
-            .setOffset(0)
-            .build(),
-        bid.getDatanodeBlockIDProtobuf(),
-        null, null);
+    try (ContainerApi containerClient = new ContainerApiImpl(client, null, null)) {
+      BlockID bid = new BlockID(1, 1);
+      bid.setBlockCommitSequenceId(1);
+      containerClient.readChunk(
+          ChunkInfo.newBuilder()
+              .setChunkName("Anything")
+              .setChecksumData(ContainerProtos.ChecksumData.newBuilder()
+                  .setBytesPerChecksum(512)
+                  .setType(ContainerProtos.ChecksumType.CRC32)
+                  .build())
+              .setLen(-1)
+              .setOffset(0)
+              .build(),
+          bid.getDatanodeBlockIDProtobuf());
+    }
   }
 
   private void invokeXceiverClientReadSmallFile(XceiverClientSpi client)

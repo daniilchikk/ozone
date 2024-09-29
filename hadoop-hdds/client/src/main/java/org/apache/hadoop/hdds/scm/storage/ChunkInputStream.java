@@ -20,7 +20,6 @@ package org.apache.hadoop.hdds.scm.storage;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import java.util.ArrayList;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.fs.ByteBufferReadable;
 import org.apache.hadoop.fs.CanUnbuffer;
@@ -47,6 +46,7 @@ import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.function.Supplier;
@@ -438,20 +438,20 @@ public class ChunkInputStream extends InputStream
   protected ByteBuffer[] readChunk(ChunkInfo readChunkInfo)
       throws IOException {
 
-    ReadChunkResponseProto readChunkResponse =
-        ContainerProtocolCalls.readChunk(xceiverClient, readChunkInfo, datanodeBlockID, validators,
-            tokenSupplier.get());
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, tokenSupplier.get(), validators)) {
+      ReadChunkResponseProto readChunkResponse = containerClient.readChunk(readChunkInfo, datanodeBlockID);
 
-    if (readChunkResponse.hasData()) {
-      return readChunkResponse.getData().asReadOnlyByteBufferList()
-          .toArray(new ByteBuffer[0]);
-    } else if (readChunkResponse.hasDataBuffers()) {
-      List<ByteString> buffersList = readChunkResponse.getDataBuffers()
-          .getBuffersList();
-      return BufferUtils.getReadOnlyByteBuffersArray(buffersList);
-    } else {
-      throw new IOException("Unexpected error while reading chunk data " +
-          "from container. No data returned.");
+      if (readChunkResponse.hasData()) {
+        return readChunkResponse.getData().asReadOnlyByteBufferList()
+            .toArray(new ByteBuffer[0]);
+      } else if (readChunkResponse.hasDataBuffers()) {
+        List<ByteString> buffersList = readChunkResponse.getDataBuffers()
+            .getBuffersList();
+        return BufferUtils.getReadOnlyByteBuffersArray(buffersList);
+      } else {
+        throw new IOException("Unexpected error while reading chunk data " +
+            "from container. No data returned.");
+      }
     }
   }
 

@@ -18,11 +18,14 @@
 package org.apache.hadoop.ozone.container.ec.reconstruction;
 
 import com.google.common.collect.ImmutableList;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
 import org.apache.commons.collections.map.SingletonMap;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
@@ -36,8 +39,6 @@ import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State;
-import jakarta.annotation.Nonnull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +47,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * This class wraps necessary container-level rpc calls
@@ -160,15 +160,12 @@ public class ECContainerOperationClient implements Closeable {
     }
   }
 
-  public void createRecoveringContainer(long containerID, DatanodeDetails dn,
-      ECReplicationConfig repConfig, String encodedToken, int replicaIndex)
-      throws IOException {
+  public void createRecoveringContainer(long containerID, DatanodeDetails dn, ECReplicationConfig repConfig,
+      @Nullable Token<? extends TokenIdentifier> token, int replicaIndex) throws IOException {
     XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(
         singleNodePipeline(dn, repConfig));
-    try {
-      ContainerProtocolCalls
-          .createRecoveringContainer(xceiverClient, containerID, encodedToken,
-              replicaIndex);
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
+      containerClient.createRecoveringContainer(containerID, replicaIndex);
     } finally {
       this.xceiverClientManager.releaseClient(xceiverClient, false);
     }

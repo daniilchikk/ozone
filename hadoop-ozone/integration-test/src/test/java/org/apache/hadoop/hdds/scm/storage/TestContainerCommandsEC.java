@@ -478,9 +478,9 @@ public class TestContainerCommandsEC {
 
         //Create the recovering container in DN.
         String encodedToken = cToken.encodeToUrlString();
-        ContainerProtocolCalls.createRecoveringContainer(dnClient,
-            container.containerID().getProtobuf().getId(),
-            encodedToken, replicaIndex);
+        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
+          containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), replicaIndex);
+        }
 
         BlockID blockID = ContainerTestHelper
             .getTestBlockID(container.containerID().getProtobuf().getId());
@@ -519,18 +519,21 @@ public class TestContainerCommandsEC {
                 container.containerID().getProtobuf().getId(), encodedToken);
         assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
             readContainerResponseProto.getContainerData().getState());
-        ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
-            ContainerProtocolCalls.readChunk(dnClient,
-                writeChunkRequest.getWriteChunk().getChunkData(),
-                blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build(), null,
-                blockToken);
-        ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
-            .getReadOnlyByteBuffersArray(
-                readChunkResponseProto.getDataBuffers().getBuffersList());
-        assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
-        byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
-        readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
-        assertArrayEquals(data, readBuff);
+
+        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, blockToken)) {
+          ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
+              containerClient.readChunk(
+                  writeChunkRequest.getWriteChunk().getChunkData(),
+                  blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build());
+
+          ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
+              .getReadOnlyByteBuffersArray(
+                  readChunkResponseProto.getDataBuffers().getBuffersList());
+          assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
+          byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
+          readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
+          assertArrayEquals(data, readBuff);
+        }
       } finally {
         xceiverClientManager.releaseClient(dnClient, false);
       }
@@ -567,10 +570,9 @@ public class TestContainerCommandsEC {
                 HddsProtos.LifeCycleEvent.CLOSE);
 
         //Create the recovering container in target DN.
-        String encodedToken = cToken.encodeToUrlString();
-        ContainerProtocolCalls.createRecoveringContainer(dnClient,
-            container.containerID().getProtobuf().getId(),
-            encodedToken, 4);
+        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
+          containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), 4);
+        }
 
         // Restart the DN.
         cluster.restartHddsDatanode(targetDN, true);

@@ -127,6 +127,20 @@ public class ContainerApiImpl implements ContainerApi {
     }
   }
 
+  @Override
+  public XceiverClientReply writeChunkAsync(ChunkInfo chunk, BlockID blockId, ByteString data, int replicationIndex,
+      BlockData blockData, boolean close) throws IOException, ExecutionException, InterruptedException {
+    ContainerCommandRequestProto request =
+        requestHelper.createWriteChunkRequest(chunk, blockId, data, replicationIndex, blockData, close);
+
+    return client.sendCommandAsync(request);
+  }
+
+  @Override
+  public void createRecoveringContainer(long containerID, int replicaIndex) {
+
+  }
+
   private GetBlockResponseProto getBlock(BlockID blockId, DatanodeDetails datanode,
       Map<DatanodeDetails, Integer> replicaIndexes) throws IOException {
 

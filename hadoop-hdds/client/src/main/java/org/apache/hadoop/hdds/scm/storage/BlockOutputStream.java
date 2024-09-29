@@ -57,7 +57,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import static org.apache.hadoop.hdds.DatanodeVersion.COMBINED_PUTBLOCK_WRITECHUNK_RPC;
-import static org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls.writeChunkAsync;
 import static org.apache.hadoop.ozone.OzoneConsts.INCREMENTAL_CHUNK_LIST;
 
 /**
@@ -620,7 +619,7 @@ public class BlockOutputStream extends OutputStream {
       // never reach, just to make compiler happy.
       return null;
     }
-    return flushFuture.thenApply(r -> new PutBlockResult(flushPos, asyncReply.getLogIndex(), r));
+    return flushFuture.thenApply(r -> new PutBlockResult(asyncReply.getLogIndex(), r));
   }
 
   @Override
@@ -882,8 +881,8 @@ public class BlockOutputStream extends OutputStream {
    * checksum
    * @return
    */
-  private CompletableFuture<PutBlockResult> writeChunkToContainer(
-      ChunkBuffer chunk, boolean putBlockPiggybacking, boolean close) throws IOException {
+  private CompletableFuture<PutBlockResult> writeChunkToContainer(ChunkBuffer chunk, boolean putBlockPiggybacking,
+      boolean close) throws IOException {
     int effectiveChunkSize = chunk.remaining();
     final long offset = chunkOffset.getAndAdd(effectiveChunkSize);
     final ByteString data = chunk.toByteString(
@@ -916,10 +915,9 @@ public class BlockOutputStream extends OutputStream {
     }
 
     final List<ChunkBuffer> byteBufferList;
-    CompletableFuture<ContainerCommandResponseProto>
-        validateFuture = null;
+    CompletableFuture<ContainerCommandResponseProto> validateFuture;
     XceiverClientReply asyncReply;
-    try {
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
       BlockData blockData = null;
 
       if (supportIncrementalChunkList) {
@@ -945,10 +943,10 @@ public class BlockOutputStream extends OutputStream {
         byteBufferList = null;
       }
 
-      asyncReply = writeChunkAsync(xceiverClient, chunkInfo,
-          blockID.get(), data, tokenString, replicationIndex, blockData, close);
-      CompletableFuture<ContainerCommandResponseProto>
-          respFuture = asyncReply.getResponse();
+      asyncReply = containerClient.writeChunkAsync(chunkInfo, blockID.get(), data, replicationIndex, blockData, close);
+
+      CompletableFuture<ContainerCommandResponseProto> respFuture = asyncReply.getResponse();
+
       validateFuture = respFuture.thenApplyAsync(e -> {
         try {
           validateResponse(e);
@@ -972,14 +970,14 @@ public class BlockOutputStream extends OutputStream {
       clientMetrics.recordWriteChunk(pipeline, chunkInfo.getLen());
 
     } catch (IOException | ExecutionException e) {
-      throw new IOException(EXCEPTION_MSG + e.toString(), e);
+      throw new IOException(EXCEPTION_MSG + e, e);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       handleInterruptedException(ex, false);
       // never reach.
       return null;
     }
-    return validateFuture.thenApply(x -> new PutBlockResult(flushPos, asyncReply.getLogIndex(), x));
+    return validateFuture.thenApply(x -> new PutBlockResult(asyncReply.getLogIndex(), x));
   }
 
   private void handleSuccessfulPutBlock(

@@ -19,10 +19,12 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 
 import java.io.IOException;
 import java.util.Map;
@@ -44,6 +46,19 @@ public interface ContainerApi extends AutoCloseable {
   FinalizeBlockResponseProto finalizeBlock(DatanodeBlockID blockId) throws IOException;
 
   ReadChunkResponseProto readChunk(ChunkInfo chunk, DatanodeBlockID blockId) throws IOException;
+
+  XceiverClientReply writeChunkAsync(ChunkInfo chunk, BlockID blockId, ByteString data, int replicationIndex,
+      BlockData blockData, boolean close) throws IOException, ExecutionException, InterruptedException;
+
+  default void createRecoveringContainer(long containerId, int replicaIndex) {
+    createContainer(containerId, ContainerDataProto.State.RECOVERING, replicaIndex);
+  }
+
+  default void createContainer(long containerId) {
+    createContainer(containerId, null, 0);
+  }
+
+  void createContainer(long containerId, @Nullable ContainerDataProto.State state, int replicaIndex);
 
   @Override
   void close();
