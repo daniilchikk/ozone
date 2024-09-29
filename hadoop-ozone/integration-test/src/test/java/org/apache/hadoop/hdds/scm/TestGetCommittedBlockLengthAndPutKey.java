@@ -28,6 +28,8 @@ import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
@@ -111,14 +113,13 @@ public class TestGetCommittedBlockLengthAndPutKey {
             .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
     client.sendCommand(putKeyRequest);
     GenericTestUtils.waitFor(() -> {
-      try {
-        response.set(ContainerProtocolCalls
-            .getCommittedBlockLength(client, blockID, null));
+      try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
+        response.set(containerClient.getCommittedBlockLength(blockID));
+        return true;
       } catch (IOException e) {
         LOG.debug("Ignore the exception till wait: {}", e.getMessage());
         return false;
       }
-      return true;
     }, 500, 5000);
     // make sure the block ids in the request and response are same.
     assertEquals(blockID, BlockID.getFromProtobuf(response.get().getBlockID()));
@@ -142,8 +143,11 @@ public class TestGetCommittedBlockLengthAndPutKey {
 
     // There is no block written inside the container. The request should fail.
     Throwable t = assertThrows(StorageContainerException.class,
-        () -> ContainerProtocolCalls.getCommittedBlockLength(client, blockID,
-            null));
+        () -> {
+          try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
+            containerClient.getCommittedBlockLength(blockID);
+          }
+        });
     assertThat(t.getMessage()).contains("Unable to find the block");
 
     xceiverClientManager.releaseClient(client, false);

@@ -110,6 +110,16 @@ class ContainerApiHelper {
     return containerCommandBuilder.build();
   }
 
+  ContainerCommandRequestProto createGetCommittedBlockLengthRequest(BlockID blockId) {
+    GetCommittedBlockLengthRequestProto.Builder getBlockLengthRequest =
+        GetCommittedBlockLengthRequestProto.newBuilder().
+            setBlockID(blockId.getDatanodeBlockIDProtobuf());
+
+    return createContainerCommandRequestBuilder(GetCommittedBlockLength, blockId.getContainerID())
+        .setGetCommittedBlockLength(getBlockLengthRequest)
+        .build();
+  }
+
   private ContainerCommandRequestProto.Builder createContainerCommandRequestBuilder(ContainerProtos.Type type,
       long containerId) {
 

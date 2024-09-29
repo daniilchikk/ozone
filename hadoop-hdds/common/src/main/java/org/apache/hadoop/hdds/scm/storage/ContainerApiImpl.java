@@ -23,6 +23,7 @@ import io.opentracing.util.GlobalTracer;
 import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
@@ -84,6 +85,13 @@ public class ContainerApiImpl implements ContainerApi {
     return tryEachDatanode(client.getPipeline(),
         d -> getBlock(blockId, d, replicaIndexes),
         d -> toErrorMessage(blockId, d));
+  }
+
+  @Override
+  public ContainerProtos.GetCommittedBlockLengthResponseProto getCommittedBlockLength(BlockID blockId) throws IOException {
+    ContainerCommandRequestProto request = requestHelper.createGetCommittedBlockLengthRequest(blockId);
+
+    return  client.sendCommand(request, validators).getGetCommittedBlockLength();
   }
 
   private GetBlockResponseProto getBlock(BlockID blockId, DatanodeDetails datanode,
