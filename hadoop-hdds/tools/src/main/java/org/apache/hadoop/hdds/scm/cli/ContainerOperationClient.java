@@ -18,6 +18,7 @@
 package org.apache.hadoop.hdds.scm.cli;
 
 import com.google.common.base.Preconditions;
+import jakarta.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
@@ -29,15 +30,14 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerD
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.DeletedBlocksTransactionInfo;
+import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.ContainerBalancerStatusInfoResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.DecommissionScmResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.StartContainerBalancerResponseProto;
-import org.apache.hadoop.hdds.protocol.proto.StorageContainerLocationProtocolProtos.ContainerBalancerStatusInfoResponseProto;
 import org.apache.hadoop.hdds.scm.DatanodeAdminError;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
-import org.apache.hadoop.hdds.security.x509.certificate.client.CACertificateProvider;
 import org.apache.hadoop.hdds.scm.client.ScmClient;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
@@ -46,21 +46,21 @@ import org.apache.hadoop.hdds.scm.container.ReplicationManagerReport;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
+import org.apache.hadoop.hdds.security.x509.certificate.client.CACertificateProvider;
 import org.apache.hadoop.hdds.utils.HAUtils;
 import org.apache.hadoop.hdds.utils.HddsServerUtil;
 import org.apache.hadoop.ozone.ClientVersion;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.StatusAndMessages;
+import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.TokenIdentifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_CONTAINER_TOKEN_ENABLED;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_CONTAINER_TOKEN_ENABLED_DEFAULT;
@@ -171,17 +171,15 @@ public class ContainerOperationClient implements ScmClient {
    * @param containerId - Container ID.
    * @throws IOException
    */
-  public void createContainer(XceiverClientSpi client,
-      long containerId) throws IOException {
-    String encodedToken = getEncodedContainerToken(containerId);
+  public void createContainer(XceiverClientSpi client, long containerId) throws IOException {
+    Token<? extends TokenIdentifier> token = getContainerToken(containerId);
+    try (ContainerApi containerClient = new ContainerApiImpl(client, token)) {
+      containerClient.createContainer(containerId);
 
-    ContainerProtocolCalls.createContainer(client, containerId, encodedToken);
-
-    // Let us log this info after we let SCM know that we have completed the
-    // creation state.
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Created container {} machines {}", containerId,
-              client.getPipeline().getNodes());
+      // Let us log this info after we let SCM know that we have completed the creation state.
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Created container {} machines {}", containerId, client.getPipeline().getNodes());
+      }
     }
   }
 
@@ -192,6 +190,14 @@ public class ContainerOperationClient implements ScmClient {
     ContainerID containerID = ContainerID.valueOf(containerId);
     return storageContainerLocationClient.getContainerToken(containerID)
         .encodeToUrlString();
+  }
+
+  public @Nullable Token<? extends TokenIdentifier> getContainerToken(long containerId) throws IOException {
+    if (!containerTokenEnabled) {
+      return null;
+    }
+    ContainerID containerID = ContainerID.valueOf(containerId);
+    return storageContainerLocationClient.getContainerToken(containerID);
   }
 
   @Override
@@ -310,24 +316,15 @@ public class ContainerOperationClient implements ScmClient {
   @Override
   public void deleteContainer(long containerId, Pipeline pipeline,
       boolean force) throws IOException {
-    XceiverClientSpi client = null;
     XceiverClientManager clientManager = getXceiverClientManager();
-    try {
-      String encodedToken = getEncodedContainerToken(containerId);
+    XceiverClientSpi client = clientManager.acquireClient(pipeline);
 
-      client = clientManager.acquireClient(pipeline);
-      ContainerProtocolCalls
-          .deleteContainer(client, containerId, force, encodedToken);
-      storageContainerLocationClient
-          .deleteContainer(containerId);
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Deleted container {}, machines: {} ", containerId,
-            pipeline.getNodes());
-      }
+    try (ContainerApi containerClient = new ContainerApiImpl(client, getContainerToken(containerId))) {
+      containerClient.deleteContainer(containerId, force);
+      storageContainerLocationClient.deleteContainer(containerId);
+      LOG.debug("Deleted container {}, machines: {} ", containerId, pipeline.getNodes());
     } finally {
-      if (client != null) {
-        clientManager.releaseClient(client, false);
-      }
+      clientManager.releaseClient(client, false);
     }
   }
 
@@ -355,24 +352,16 @@ public class ContainerOperationClient implements ScmClient {
   }
 
   @Override
-  public ContainerDataProto readContainer(long containerID,
-      Pipeline pipeline) throws IOException {
+  public ContainerDataProto readContainer(long containerID, Pipeline pipeline) throws IOException {
     XceiverClientManager clientManager = getXceiverClientManager();
-    String encodedToken = getEncodedContainerToken(containerID);
-    XceiverClientSpi client = null;
-    try {
-      client = clientManager.acquireClientForReadData(pipeline);
-      ReadContainerResponseProto response = ContainerProtocolCalls
-          .readContainer(client, containerID, encodedToken);
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Read container {}, machines: {} ", containerID,
-            pipeline.getNodes());
-      }
+    XceiverClientSpi client = clientManager.acquireClientForReadData(pipeline);
+
+    try (ContainerApi containerClient = new ContainerApiImpl(client, getContainerToken(containerID))) {
+      ReadContainerResponseProto response = containerClient.readContainer(containerID);
+      LOG.debug("Read container {}, machines: {} ", containerID, pipeline.getNodes());
       return response.getContainerData();
     } finally {
-      if (client != null) {
-        clientManager.releaseClient(client, false);
-      }
+      clientManager.releaseClient(client, false);
     }
   }
 

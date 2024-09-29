@@ -18,13 +18,28 @@
 
 package org.apache.hadoop.ozone.container.replication;
 
-import static java.util.Collections.singleton;
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State.CLOSED;
-import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_DEADNODE_INTERVAL;
-import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_STALENODE_INTERVAL;
-import static org.apache.hadoop.hdds.scm.pipeline.MockPipeline.createPipeline;
-import static org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls.createContainer;
-import static org.apache.ozone.test.GenericTestUtils.waitFor;
+import com.google.common.collect.ImmutableList;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails.Port;
+import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
+import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.container.replication.ReplicationManager.ReplicationManagerConfiguration;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
+import org.apache.hadoop.hdds.utils.IOUtils;
+import org.apache.hadoop.ozone.HddsDatanodeService;
+import org.apache.hadoop.ozone.MiniOzoneCluster;
+import org.apache.hadoop.ozone.container.common.statemachine.DatanodeStateMachine;
+import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
+import org.apache.hadoop.ozone.protocol.commands.ReplicateContainerCommand;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -35,27 +50,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.ToLongFunction;
 import java.util.stream.IntStream;
 
-import com.google.common.collect.ImmutableList;
-import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails.Port;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.container.replication.ReplicationManager.ReplicationManagerConfiguration;
-import org.apache.hadoop.hdds.utils.IOUtils;
-import org.apache.hadoop.ozone.HddsDatanodeService;
-import org.apache.hadoop.ozone.MiniOzoneCluster;
-import org.apache.hadoop.ozone.container.common.statemachine.DatanodeStateMachine;
-import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
-
-import org.apache.hadoop.ozone.protocol.commands.ReplicateContainerCommand;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import static java.util.Collections.singleton;
+import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State.CLOSED;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_DEADNODE_INTERVAL;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_STALENODE_INTERVAL;
+import static org.apache.hadoop.hdds.scm.pipeline.MockPipeline.createPipeline;
+import static org.apache.ozone.test.GenericTestUtils.waitFor;
 
 /**
  * Tests ozone containers replication.
@@ -210,9 +210,10 @@ class TestContainerReplication {
   private static long createNewClosedContainer(DatanodeDetails dn)
       throws Exception {
     long containerID = CONTAINER_ID.incrementAndGet();
-    try (XceiverClientSpi client = clientFactory.acquireClient(
-        createPipeline(singleton(dn)))) {
-      createContainer(client, containerID, null, CLOSED, 0);
+    try (XceiverClientSpi client = clientFactory.acquireClient(createPipeline(singleton(dn)));
+         ContainerApi containerClient = new ContainerApiImpl(client, null);
+    ) {
+      containerClient.createContainer(containerID, CLOSED, 0);
       return containerID;
     }
   }

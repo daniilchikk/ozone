@@ -50,15 +50,24 @@ public interface ContainerApi extends AutoCloseable {
   XceiverClientReply writeChunkAsync(ChunkInfo chunk, BlockID blockId, ByteString data, int replicationIndex,
       BlockData blockData, boolean close) throws IOException, ExecutionException, InterruptedException;
 
-  default void createRecoveringContainer(long containerId, int replicaIndex) {
+  default void createRecoveringContainer(long containerId, int replicaIndex) throws IOException {
     createContainer(containerId, ContainerDataProto.State.RECOVERING, replicaIndex);
   }
 
-  default void createContainer(long containerId) {
+  default void createContainer(long containerId) throws IOException {
     createContainer(containerId, null, 0);
   }
 
-  void createContainer(long containerId, @Nullable ContainerDataProto.State state, int replicaIndex);
+  void createContainer(long containerId, @Nullable ContainerDataProto.State state, int replicaIndex) throws IOException;
+
+  void deleteContainer(long containerId, boolean force) throws IOException;
+
+  void closeContainer(long containerId) throws IOException;
+
+  ReadContainerResponseProto readContainer(long containerId) throws IOException;
+
+  EchoResponseProto echo(long containerId, ByteString payloadReqBytes, int payloadRespSizeKB, int sleepTimeMs,
+      boolean readOnly) throws IOException;
 
   @Override
   void close();

@@ -17,21 +17,17 @@
  */
 package org.apache.hadoop.hdds.scm;
 
-import org.apache.hadoop.hdds.client.BlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.EchoResponseProto;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
+import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
+import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdds.scm.storage.ContainerApi;
 import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
-import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
-import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
-import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.ozone.OzoneConsts;
-import org.apache.hadoop.ozone.container.ContainerTestHelper;
 import org.apache.hadoop.ozone.container.common.SCMTestUtils;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.ratis.thirdparty.com.google.protobuf.UnsafeByteOperations;
@@ -40,11 +36,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 
 /**
  * Test Container calls.
@@ -80,138 +72,20 @@ public class TestContainerSmallFile {
   }
 
   @Test
-  public void testAllocateWrite() throws Exception {
-    ContainerWithPipeline container =
-        storageContainerLocationClient.allocateContainer(
-            SCMTestUtils.getReplicationType(ozoneConfig),
-            HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    XceiverClientSpi client = xceiverClientManager
-        .acquireClient(container.getPipeline());
-    ContainerProtocolCalls.createContainer(client,
-        container.getContainerInfo().getContainerID(), null);
-
-    BlockID blockID = ContainerTestHelper.getTestBlockID(
-        container.getContainerInfo().getContainerID());
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.writeSmallFile(blockID, "data123".getBytes(UTF_8));
-      ContainerProtos.GetSmallFileResponseProto response =
-          ContainerProtocolCalls.readSmallFile(client, blockID, null);
-      String readData = response.getData().getDataBuffers().getBuffersList()
-          .get(0).toStringUtf8();
-      assertEquals("data123", readData);
-    }
-    xceiverClientManager.releaseClient(client, false);
-  }
-
-  @Test
-  public void testInvalidBlockRead() throws Exception {
-    ContainerWithPipeline container =
-        storageContainerLocationClient.allocateContainer(
-            SCMTestUtils.getReplicationType(ozoneConfig),
-            HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    XceiverClientSpi client = xceiverClientManager
-        .acquireClient(container.getPipeline());
-    ContainerProtocolCalls.createContainer(client,
-        container.getContainerInfo().getContainerID(), null);
-
-    BlockID blockID = ContainerTestHelper.getTestBlockID(
-        container.getContainerInfo().getContainerID());
-    // Try to read a Key Container Name
-    assertThrowsExactly(StorageContainerException.class,
-        () -> ContainerProtocolCalls.readSmallFile(client, blockID, null),
-        "Unable to find the block");
-    xceiverClientManager.releaseClient(client, false);
-  }
-
-  @Test
-  public void testInvalidContainerRead() throws Exception {
-    long nonExistContainerID = 8888L;
-    ContainerWithPipeline container =
-        storageContainerLocationClient.allocateContainer(
-            SCMTestUtils.getReplicationType(ozoneConfig),
-            HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    XceiverClientSpi client = xceiverClientManager
-        .acquireClient(container.getPipeline());
-    ContainerProtocolCalls.createContainer(client,
-        container.getContainerInfo().getContainerID(), null);
-    BlockID blockID = ContainerTestHelper.getTestBlockID(
-        container.getContainerInfo().getContainerID());
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.writeSmallFile(blockID, "data123".getBytes(UTF_8));
-    }
-
-    assertThrowsExactly(StorageContainerException.class,
-        () -> ContainerProtocolCalls.readSmallFile(client,
-            ContainerTestHelper.getTestBlockID(nonExistContainerID),
-            null),
-        "ContainerID 8888 does not exist");
-    xceiverClientManager.releaseClient(client, false);
-  }
-
-  @Test
-  public void testReadWriteWithBCSId() throws Exception {
-    ContainerWithPipeline container =
-        storageContainerLocationClient.allocateContainer(
-            HddsProtos.ReplicationType.RATIS,
-            HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    XceiverClientSpi client = xceiverClientManager
-        .acquireClient(container.getPipeline());
-    ContainerProtocolCalls.createContainer(client,
-        container.getContainerInfo().getContainerID(), null);
-
-    BlockID blockID1 = ContainerTestHelper.getTestBlockID(
-        container.getContainerInfo().getContainerID());
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      ContainerProtos.PutSmallFileResponseProto responseProto =
-          containerClient.writeSmallFile(blockID1, "data123".getBytes(UTF_8));
-
-      long bcsId = responseProto.getCommittedBlockLength().getBlockID()
-          .getBlockCommitSequenceId();
-
-      blockID1.setBlockCommitSequenceId(bcsId + 1);
-      //read a file with higher bcsId than the container bcsId
-      StorageContainerException sce =
-          assertThrows(StorageContainerException.class, () ->
-              ContainerProtocolCalls.readSmallFile(client, blockID1, null));
-      assertSame(ContainerProtos.Result.UNKNOWN_BCSID, sce.getResult());
-
-      // write a new block again to bump up the container bcsId
-      BlockID blockID2 = ContainerTestHelper
-          .getTestBlockID(container.getContainerInfo().getContainerID());
-
-      containerClient.writeSmallFile(blockID2, "data123".getBytes(UTF_8));
-
-      blockID1.setBlockCommitSequenceId(bcsId + 1);
-
-      //read a file with higher bcsId than the committed bcsId for the block
-      sce = assertThrows(StorageContainerException.class, () ->
-          ContainerProtocolCalls.readSmallFile(client, blockID1, null));
-      assertSame(ContainerProtos.Result.BCSID_MISMATCH, sce.getResult());
-
-      blockID1.setBlockCommitSequenceId(bcsId);
-    }
-    ContainerProtos.GetSmallFileResponseProto response =
-        ContainerProtocolCalls.readSmallFile(client, blockID1, null);
-    String readData = response.getData().getDataBuffers().getBuffersList()
-        .get(0).toStringUtf8();
-    assertEquals("data123", readData);
-    xceiverClientManager.releaseClient(client, false);
-  }
-
-  @Test
   public void testEcho() throws Exception {
-    ContainerWithPipeline container =
-        storageContainerLocationClient.allocateContainer(
-            SCMTestUtils.getReplicationType(ozoneConfig),
-            HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    XceiverClientSpi client = xceiverClientManager
-        .acquireClient(container.getPipeline());
-    ContainerProtocolCalls.createContainer(client,
-        container.getContainerInfo().getContainerID(), null);
-    ByteString byteString = UnsafeByteOperations.unsafeWrap(new byte[0]);
-    ContainerProtos.EchoResponseProto response =
-        ContainerProtocolCalls.echo(client, "", container.getContainerInfo().getContainerID(), byteString, 1, 0, true);
-    assertEquals(1, response.getPayload().size());
+    ContainerWithPipeline container = storageContainerLocationClient.allocateContainer(
+        SCMTestUtils.getReplicationType(ozoneConfig),
+        HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
+
+    XceiverClientSpi client = xceiverClientManager.acquireClient(container.getPipeline());
+
+    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
+      containerClient.createContainer(container.getContainerInfo().getContainerID());
+      ByteString byteString = UnsafeByteOperations.unsafeWrap(new byte[0]);
+      EchoResponseProto response =
+          containerClient.echo(container.getContainerInfo().getContainerID(), byteString, 1, 0, true);
+      assertEquals(1, response.getPayload().size());
+    }
     xceiverClientManager.releaseClient(client, false);
   }
 }

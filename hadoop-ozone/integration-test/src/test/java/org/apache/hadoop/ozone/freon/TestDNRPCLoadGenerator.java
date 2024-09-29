@@ -27,7 +27,8 @@ import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.container.common.SCMTestUtils;
@@ -81,9 +82,10 @@ public class TestDNRPCLoadGenerator {
             SCMTestUtils.getReplicationType(conf),
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
     try (XceiverClientFactory factory = new XceiverClientCreator(conf);
-        XceiverClientSpi client = factory.acquireClient(container.getPipeline())) {
-      ContainerProtocolCalls.createContainer(client,
-          container.getContainerInfo().getContainerID(), null);
+         XceiverClientSpi client = factory.acquireClient(container.getPipeline());
+         ContainerApi containerClient = new ContainerApiImpl(client, null)
+    ) {
+      containerClient.createContainer(container.getContainerInfo().getContainerID());
     }
   }
 

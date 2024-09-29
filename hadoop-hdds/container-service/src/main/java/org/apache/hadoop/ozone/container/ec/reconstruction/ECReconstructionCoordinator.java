@@ -49,6 +49,7 @@ import org.apache.hadoop.ozone.client.io.ECBlockReconstructedStripeInputStream;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
 import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
 import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.ratis.util.MemoizedSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -56,26 +57,9 @@ import org.slf4j.LoggerFactory;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalLong;
-import java.util.Set;
-import java.util.SortedMap;
-import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
-
-import static org.apache.hadoop.ozone.container.ec.reconstruction.TokenHelper.encode;
 
 /**
  * The Coordinator implements the main flow of reconstructing
@@ -157,7 +141,7 @@ public class ECReconstructionCoordinator implements Closeable {
     ContainerID cid = ContainerID.valueOf(containerID);
 
     // 1. create target recovering containers.
-    String containerToken = encode(tokenHelper.getContainerToken(cid));
+    Token<? extends TokenIdentifier> containerToken = tokenHelper.getContainerToken(cid);
     List<DatanodeDetails> recoveringContainersCreatedDNs = new ArrayList<>();
 
     try {
@@ -165,10 +149,8 @@ public class ECReconstructionCoordinator implements Closeable {
           .entrySet()) {
         DatanodeDetails dn = indexDnPair.getValue();
         int index = indexDnPair.getKey();
-        LOG.debug("Creating container {} on datanode {} for index {}",
-            containerID, dn, index);
-        containerOperationClient
-            .createRecoveringContainer(containerID, dn, repConfig, tokenHelper.getContainerToken(cid), index);
+        LOG.debug("Creating container {} on datanode {} for index {}", containerID, dn, index);
+        containerOperationClient.createRecoveringContainer(containerID, dn, repConfig, containerToken, index);
         recoveringContainersCreatedDNs.add(dn);
       }
 
@@ -184,8 +166,7 @@ public class ECReconstructionCoordinator implements Closeable {
       // 3. Close containers
       for (DatanodeDetails dn: recoveringContainersCreatedDNs) {
         LOG.debug("Closing container {} on datanode {}", containerID, dn);
-        containerOperationClient
-            .closeContainer(containerID, dn, repConfig, containerToken);
+        containerOperationClient.closeContainer(containerID, dn, repConfig, containerToken);
       }
       metrics.incReconstructionTotal();
       metrics.incBlockGroupReconstructionTotal(blockLocationInfoMap.size());
@@ -200,20 +181,23 @@ public class ECReconstructionCoordinator implements Closeable {
           containerID, e);
       // Delete only the current thread successfully created recovering
       // containers.
-      for (DatanodeDetails dn : recoveringContainersCreatedDNs) {
+      for (DatanodeDetails datanode : recoveringContainersCreatedDNs) {
         try {
           containerOperationClient
-              .deleteContainerInState(containerID, dn, repConfig,
-                  containerToken, ImmutableSet.of(
+              .deleteContainerInState(
+                  containerID,
+                  datanode,
+                  repConfig,
+                  containerToken,
+                  ImmutableSet.of(
                           ContainerProtos.ContainerDataProto.State.UNHEALTHY,
-                          ContainerProtos.ContainerDataProto.State.RECOVERING));
+                          ContainerProtos.ContainerDataProto.State.RECOVERING
+                  ));
           if (LOG.isDebugEnabled()) {
-            LOG.debug("Deleted the container {}, at the target: {}",
-                containerID, dn);
+            LOG.debug("Deleted the container {}, at the target: {}", containerID, datanode);
           }
         } catch (IOException ioe) {
-          LOG.error("Exception while deleting the container {} at target: {}",
-              containerID, dn, ioe);
+          LOG.error("Exception while deleting the container {} at target: {}", containerID, datanode, ioe);
         }
       }
       throw e;

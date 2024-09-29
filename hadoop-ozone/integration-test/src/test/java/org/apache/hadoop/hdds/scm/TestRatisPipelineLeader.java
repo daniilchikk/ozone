@@ -17,25 +17,17 @@
  */
 package org.apache.hadoop.hdds.scm;
 
-import java.util.List;
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-
 import org.apache.hadoop.hdds.HddsConfigKeys;
 import org.apache.hadoop.hdds.client.RatisReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.ozone.HddsDatanodeService;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.ozone.container.common.transport.server.ratis.XceiverServerRatis;
 import org.apache.ozone.test.GenericTestUtils;
-
-import static org.apache.hadoop.ozone.OzoneConfigKeys.HDDS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_KEY;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 import org.apache.ratis.protocol.ClientId;
 import org.apache.ratis.protocol.GroupInfoReply;
 import org.apache.ratis.protocol.GroupInfoRequest;
@@ -47,6 +39,15 @@ import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
+import static org.apache.hadoop.ozone.OzoneConfigKeys.HDDS_RATIS_LEADER_ELECTION_MINIMUM_TIMEOUT_DURATION_KEY;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Test pipeline leader information is correctly used.
@@ -98,15 +99,15 @@ public class TestRatisPipelineLeader {
       }
     }, 200, 20000);
     // Verify client connects to Leader without NotLeaderException
-    final Logger log = LoggerFactory.getLogger(
-        "org.apache.ratis.grpc.server.GrpcClientProtocolService");
+    final Logger log = LoggerFactory.getLogger("org.apache.ratis.grpc.server.GrpcClientProtocolService");
     GenericTestUtils.setLogLevel(log, Level.DEBUG);
     GenericTestUtils.LogCapturer logCapturer =
         GenericTestUtils.LogCapturer.captureLogs(log);
-    try (XceiverClientRatis xceiverClientRatis =
-        XceiverClientRatis.newXceiverClientRatis(ratisPipeline, conf)) {
+    try (XceiverClientRatis xceiverClientRatis = XceiverClientRatis.newXceiverClientRatis(ratisPipeline, conf);
+         ContainerApi containerClient = new ContainerApiImpl(xceiverClientRatis, null)
+    ) {
       xceiverClientRatis.connect();
-      ContainerProtocolCalls.createContainer(xceiverClientRatis, 1L, null);
+      containerClient.createContainer(1L);
     }
     logCapturer.stopCapturing();
     assertThat(logCapturer.getOutput())

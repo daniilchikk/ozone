@@ -20,10 +20,10 @@ package org.apache.hadoop.ozone.freon;
 import com.codahale.metrics.Timer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
@@ -31,11 +31,14 @@ import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CACertificateProvider;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.om.protocolPB.OzoneManagerProtocolClientSideTranslatorPB;
 import org.apache.hadoop.ozone.util.PayloadUtils;
+import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,7 +73,7 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
   private ByteString payloadReqBytes;
   private int payloadRespSize;
   private List<XceiverClientSpi> clients;
-  private String encodedContainerToken;
+  private @Nullable Token<? extends TokenIdentifier> containerToken;
   @Option(names = {"--payload-req"},
           description =
                   "Specifies the size of payload in KB in RPC request. ",
@@ -148,7 +151,7 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
               getLegacyFactor(pipeline.getReplicationConfig())))
           .build();
     }
-    encodedContainerToken = scmClient.getEncodedContainerToken(containerID);
+    containerToken = scmClient.getContainerToken(containerID);
     XceiverClientFactory xceiverClientManager;
     OzoneManagerProtocolClientSideTranslatorPB omClient;
     if (OzoneSecurityUtil.isSecurityEnabled(configuration)) {
@@ -201,10 +204,10 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
   private void sendRPCReq(long l) throws Exception {
     timer.time(() -> {
       int clientIndex = (numClients == 1) ? 0 : (int)l % numClients;
-      ContainerProtos.EchoResponseProto response =
-          ContainerProtocolCalls.echo(clients.get(clientIndex), encodedContainerToken,
-              containerID, payloadReqBytes, payloadRespSize, sleepTimeMs, readOnly);
-      return null;
+      try (ContainerApi containerClient = new ContainerApiImpl(clients.get(clientIndex), containerToken)) {
+        containerClient.echo(containerID, payloadReqBytes, payloadRespSize, sleepTimeMs, readOnly);
+        return null;
+      }
     });
   }
 }

@@ -137,8 +137,42 @@ public class ContainerApiImpl implements ContainerApi {
   }
 
   @Override
-  public void createRecoveringContainer(long containerID, int replicaIndex) {
+  public void createContainer(long containerId, @Nullable ContainerDataProto.State state, int replicaIndex)
+      throws IOException {
+    ContainerCommandRequestProto request = requestHelper.createCreateContainerRequest(containerId, state, replicaIndex);
 
+    client.sendCommand(request, validators);
+  }
+
+  @Override
+  public void deleteContainer(long containerId, boolean force) throws IOException {
+    ContainerCommandRequestProto request = requestHelper.createDeleteContainerRequest(containerId, force);
+
+    client.sendCommand(request, validators);
+  }
+
+  @Override
+  public void closeContainer(long containerId) throws IOException {
+    ContainerCommandRequestProto request = requestHelper.createCloseContainerRequest(containerId);
+
+    client.sendCommand(request, validators);
+  }
+
+  @Override
+  public ReadContainerResponseProto readContainer(long containerId) throws IOException {
+    ContainerCommandRequestProto request = requestHelper.createReadContainerRequest(containerId);
+
+    return client.sendCommand(request, validators).getReadContainer();
+  }
+
+  @Override
+  public EchoResponseProto echo(long containerId, ByteString payloadReqBytes, int payloadRespSizeKB, int sleepTimeMs,
+      boolean readOnly) throws IOException {
+
+    ContainerCommandRequestProto request = requestHelper.createEchoRequest(containerId, payloadReqBytes,
+        payloadRespSizeKB, sleepTimeMs, readOnly);
+
+    return client.sendCommand(request, validators).getEcho();
   }
 
   private GetBlockResponseProto getBlock(BlockID blockId, DatanodeDetails datanode,

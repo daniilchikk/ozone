@@ -18,15 +18,16 @@
 package org.apache.hadoop.hdds.scm;
 
 import com.google.common.cache.Cache;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.XceiverClientManager.ScmClientConfig;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
+import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
-import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.container.common.SCMTestUtils;
 import org.apache.ozone.test.GenericTestUtils;
@@ -43,11 +44,7 @@ import java.util.UUID;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_METADATA_DIR_NAME;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_SECURITY_ENABLED_KEY;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -56,14 +53,13 @@ import static org.mockito.Mockito.mock;
 @Timeout(300)
 public class TestXceiverClientManager {
 
-  private static OzoneConfiguration config;
   private static MiniOzoneCluster cluster;
   private static StorageContainerLocationProtocolClientSideTranslatorPB
       storageContainerLocationClient;
 
   @BeforeAll
   public static void init() throws Exception {
-    config = new OzoneConfiguration();
+    OzoneConfiguration config = new OzoneConfiguration();
     cluster = MiniOzoneCluster.newBuilder(config)
         .setNumDatanodes(3)
         .build();
@@ -163,18 +159,18 @@ public class TestXceiverClientManager {
               + container1.getContainerInfo().getReplicationType());
       assertNull(nonExistent1);
       // However container call should succeed because of refcount on the client
-      ContainerProtocolCalls.createContainer(client1,
-          container1.getContainerInfo().getContainerID(), null);
+      try (ContainerApi containerClient = new ContainerApiImpl(client1, null)) {
+        containerClient.createContainer(container1.getContainerInfo().getContainerID());
 
-      // After releasing the client, this connection should be closed
-      // and any container operations should fail
-      clientManager.releaseClient(client1, false);
+        // After releasing the client, this connection should be closed
+        // and any container operations should fail
+        clientManager.releaseClient(client1, false);
 
-      // Create container should throw exception on closed client
-      Throwable t = assertThrows(IOException.class,
-          () -> ContainerProtocolCalls.createContainer(client1,
-              container1.getContainerInfo().getContainerID(), null));
-      assertThat(t.getMessage()).contains("This channel is not connected");
+        // Create container should throw exception on closed client
+        Throwable t = assertThrows(IOException.class,
+            () -> containerClient.createContainer(container1.getContainerInfo().getContainerID()));
+        assertThat(t.getMessage()).contains("This channel is not connected");
+      }
 
       clientManager.releaseClient(client2, false);
     }
@@ -223,8 +219,11 @@ public class TestXceiverClientManager {
 
       // Any container operation should now fail
       Throwable t = assertThrows(IOException.class,
-          () -> ContainerProtocolCalls.createContainer(client1,
-              container1.getContainerInfo().getContainerID(), null));
+          () -> {
+            try (ContainerApi containerClient = new ContainerApiImpl(client1, null)) {
+              containerClient.createContainer(container1.getContainerInfo().getContainerID());
+            }
+          });
       assertThat(t.getMessage()).contains("This channel is not connected");
 
       clientManager.releaseClient(client2, false);

@@ -105,12 +105,11 @@ public class ECContainerOperationClient implements Closeable {
   }
 
   public void closeContainer(long containerID, DatanodeDetails dn,
-      ECReplicationConfig repConfig, String encodedToken) throws IOException {
+      ECReplicationConfig repConfig, @Nullable Token<? extends TokenIdentifier> token) throws IOException {
     XceiverClientSpi xceiverClient = this.xceiverClientManager
         .acquireClient(singleNodePipeline(dn, repConfig));
-    try {
-      ContainerProtocolCalls
-          .closeContainer(xceiverClient, containerID, encodedToken);
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
+      containerClient.closeContainer(containerID);
     } finally {
       this.xceiverClientManager.releaseClient(xceiverClient, false);
     }
@@ -129,41 +128,33 @@ public class ECContainerOperationClient implements Closeable {
    * @param containerID - Container ID.
    * @param dn - Datanode details.
    * @param repConfig - Replication config.
-   * @param encodedToken - Token
+   * @param token - Token
    */
   public void deleteContainerInState(long containerID, DatanodeDetails dn,
-         ECReplicationConfig repConfig, String encodedToken,
-         Set<State> acceptableStates) throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager
-        .acquireClient(singleNodePipeline(dn, repConfig));
-    try {
+      ECReplicationConfig repConfig, @Nullable Token<? extends TokenIdentifier> token, Set<State> acceptableStates)
+      throws IOException {
+    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(dn, repConfig));
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
       // Before deleting the recovering container, just make sure that state is
       // Recovering & Unhealthy. There will be still race condition,
       // but this will avoid most usual case.
       ContainerProtos.ReadContainerResponseProto readContainerResponseProto =
-          ContainerProtocolCalls
-              .readContainer(xceiverClient, containerID, encodedToken);
-      State currentState =
-              readContainerResponseProto.getContainerData().getState();
-      if (!Objects.isNull(acceptableStates)
-              && acceptableStates.contains(currentState)) {
-        ContainerProtocolCalls.deleteContainer(xceiverClient, containerID,
-                        true, encodedToken);
+          containerClient.readContainer(containerID);
+      State currentState = readContainerResponseProto.getContainerData().getState();
+      if (!Objects.isNull(acceptableStates) && acceptableStates.contains(currentState)) {
+        containerClient.deleteContainer(containerID, true);
       } else {
-        LOG.warn("Container {} will not be deleted as current state " +
-                "not in acceptable states. Current state: {}, " +
-                "Acceptable States: {}", containerID, currentState,
-                acceptableStates);
+        LOG.warn("Container {} will not be deleted as current state not in acceptable states. Current state: {}, " +
+                "Acceptable States: {}", containerID, currentState, acceptableStates);
       }
     } finally {
       this.xceiverClientManager.releaseClient(xceiverClient, false);
     }
   }
 
-  public void createRecoveringContainer(long containerID, DatanodeDetails dn, ECReplicationConfig repConfig,
+  public void createRecoveringContainer(long containerID, DatanodeDetails datanode, ECReplicationConfig repConfig,
       @Nullable Token<? extends TokenIdentifier> token, int replicaIndex) throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(
-        singleNodePipeline(dn, repConfig));
+    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(datanode, repConfig));
     try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
       containerClient.createRecoveringContainer(containerID, replicaIndex);
     } finally {

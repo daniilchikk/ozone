@@ -24,9 +24,6 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
-import org.apache.hadoop.ozone.common.Checksum;
-import org.apache.hadoop.ozone.common.ChecksumData;
-import org.apache.hadoop.ozone.common.OzoneChecksumException;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
@@ -35,7 +32,6 @@ import java.io.IOException;
 import java.util.Map;
 
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.*;
-
 
 /**
  * Class designed working with Datanode Proto requests and responses.
@@ -106,12 +102,9 @@ class ContainerApiHelper {
   }
 
   ContainerCommandRequestProto createReadContainerRequest(long containerId) {
-    ContainerCommandRequestProto.Builder containerCommandBuilder =
-        createContainerCommandRequestBuilder(ReadContainer, containerId);
-
-    containerCommandBuilder.setReadContainer(ReadContainerRequestProto.getDefaultInstance());
-
-    return containerCommandBuilder.build();
+    return createContainerCommandRequestBuilder(ReadContainer, containerId)
+        .setReadContainer(ReadContainerRequestProto.getDefaultInstance())
+        .build();
   }
 
   ContainerCommandRequestProto createGetCommittedBlockLengthRequest(BlockID blockId) {
@@ -135,7 +128,7 @@ class ContainerApiHelper {
         .build();
   }
 
-  public ContainerCommandRequestProto createFinalizeBlockRequest(DatanodeBlockID blockId) {
+  ContainerCommandRequestProto createFinalizeBlockRequest(DatanodeBlockID blockId) {
     FinalizeBlockRequestProto.Builder finalizeBlockRequest = FinalizeBlockRequestProto.newBuilder().setBlockID(blockId);
 
     return createContainerCommandRequestBuilder(FinalizeBlock, blockId.getContainerID())
@@ -143,7 +136,7 @@ class ContainerApiHelper {
         .build();
   }
 
-  public ContainerCommandRequestProto createReadChunkRequest(ChunkInfo chunk, DatanodeBlockID blockId) {
+  ContainerCommandRequestProto createReadChunkRequest(ChunkInfo chunk, DatanodeBlockID blockId) {
     ReadChunkRequestProto readChunkRequest =
         ReadChunkRequestProto.newBuilder()
             .setBlockID(blockId)
@@ -156,7 +149,7 @@ class ContainerApiHelper {
         .build();
   }
 
-  public ContainerCommandRequestProto createWriteChunkRequest(ChunkInfo chunk, BlockID blockId, ByteString data,
+  ContainerCommandRequestProto createWriteChunkRequest(ChunkInfo chunk, BlockID blockId, ByteString data,
       int replicationIndex, BlockData blockData, boolean close) {
     long containerId = blockId.getContainerID();
 
@@ -181,6 +174,52 @@ class ContainerApiHelper {
 
     return createContainerCommandRequestBuilder(WriteChunk, containerId)
         .setWriteChunk(writeChunkRequest.build())
+        .build();
+  }
+
+  ContainerCommandRequestProto createCreateContainerRequest(long containerId, @Nullable ContainerDataProto.State state,
+      int replicaIndex) {
+    CreateContainerRequestProto.Builder createRequest = CreateContainerRequestProto.newBuilder();
+    createRequest.setContainerType(ContainerProtos.ContainerType.KeyValueContainer);
+    if (state != null) {
+      createRequest.setState(state);
+    }
+    if (replicaIndex > 0) {
+      createRequest.setReplicaIndex(replicaIndex);
+    }
+
+    return createContainerCommandRequestBuilder(CreateContainer, containerId)
+        .setCreateContainer(createRequest.build())
+        .build();
+  }
+
+  public ContainerCommandRequestProto createDeleteContainerRequest(long containerId, boolean force) {
+    DeleteContainerRequestProto.Builder deleteRequest = DeleteContainerRequestProto.newBuilder()
+        .setForceDelete(force);
+
+    return createContainerCommandRequestBuilder(DeleteContainer, containerId)
+        .setDeleteContainer(deleteRequest)
+        .build();
+  }
+
+  public ContainerCommandRequestProto createCloseContainerRequest(long containerId) {
+    return createContainerCommandRequestBuilder(CloseContainer, containerId)
+        .setCloseContainer(CloseContainerRequestProto.getDefaultInstance())
+        .build();
+  }
+
+  public ContainerCommandRequestProto createEchoRequest(long containerId, ByteString payloadReqBytes,
+      int payloadRespSizeKB, int sleepTimeMs, boolean readOnly) {
+
+    EchoRequestProto getEcho = EchoRequestProto.newBuilder()
+        .setPayload(payloadReqBytes)
+        .setPayloadSizeResp(payloadRespSizeKB)
+        .setSleepTimeMs(sleepTimeMs)
+        .setReadOnly(readOnly)
+        .build();
+
+    return createContainerCommandRequestBuilder(Echo, containerId)
+        .setEcho(getEcho)
         .build();
   }
 

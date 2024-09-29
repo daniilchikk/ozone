@@ -30,6 +30,7 @@ import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
@@ -450,11 +451,9 @@ public class TestContainerCommandsEC {
 
   @Test
   public void testCreateRecoveryContainer() throws Exception {
-    try (XceiverClientManager xceiverClientManager =
-        new XceiverClientManager(config)) {
+    try (XceiverClientManager xceiverClientManager = new XceiverClientManager(config)) {
       ECReplicationConfig replicationConfig = new ECReplicationConfig(3, 2);
-      Pipeline newPipeline =
-          scm.getPipelineManager().createPipeline(replicationConfig);
+      Pipeline newPipeline = scm.getPipelineManager().createPipeline(replicationConfig);
       scm.getPipelineManager().activatePipeline(newPipeline.getId());
       final ContainerInfo container = scm.getContainerManager()
           .allocateContainer(replicationConfig, "test");
@@ -466,7 +465,7 @@ public class TestContainerCommandsEC {
       XceiverClientSpi dnClient = xceiverClientManager.acquireClient(
           createSingleNodePipeline(newPipeline, newPipeline.getNodes().get(0),
               replicaIndex));
-      try {
+      try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
         // To create the actual situation, container would have been in closed
         // state at SCM.
         scm.getContainerManager().getContainerStateManager()
@@ -478,9 +477,8 @@ public class TestContainerCommandsEC {
 
         //Create the recovering container in DN.
         String encodedToken = cToken.encodeToUrlString();
-        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
-          containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), replicaIndex);
-        }
+
+        containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), replicaIndex);
 
         BlockID blockID = ContainerTestHelper
             .getTestBlockID(container.containerID().getProtobuf().getId());
@@ -501,9 +499,9 @@ public class TestContainerCommandsEC {
                 writeChunkRequest.getWriteChunk());
         dnClient.sendCommand(putKeyRequest);
 
-        ContainerProtos.ReadContainerResponseProto readContainerResponseProto =
-            ContainerProtocolCalls.readContainer(dnClient,
-                container.containerID().getProtobuf().getId(), encodedToken);
+        ReadContainerResponseProto readContainerResponseProto =
+            containerClient.readContainer(container.containerID().getProtobuf().getId());
+
         assertEquals(ContainerProtos.ContainerDataProto.State.RECOVERING,
             readContainerResponseProto.getContainerData().getState());
         // Container at SCM should be still in closed state.
@@ -511,29 +509,25 @@ public class TestContainerCommandsEC {
             scm.getContainerManager().getContainerStateManager()
                 .getContainer(container.containerID()).getState());
         // close container call
-        ContainerProtocolCalls.closeContainer(dnClient,
-            container.containerID().getProtobuf().getId(), encodedToken);
+        containerClient.closeContainer(container.containerID().getProtobuf().getId());
         // Make sure we have the container and readable.
-        readContainerResponseProto = ContainerProtocolCalls
-            .readContainer(dnClient,
-                container.containerID().getProtobuf().getId(), encodedToken);
+        readContainerResponseProto = containerClient.readContainer(container.containerID().getProtobuf().getId());
+
         assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
             readContainerResponseProto.getContainerData().getState());
 
-        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, blockToken)) {
-          ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
-              containerClient.readChunk(
-                  writeChunkRequest.getWriteChunk().getChunkData(),
-                  blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build());
+        ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
+            containerClient.readChunk(
+                writeChunkRequest.getWriteChunk().getChunkData(),
+                blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build());
 
-          ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
-              .getReadOnlyByteBuffersArray(
-                  readChunkResponseProto.getDataBuffers().getBuffersList());
-          assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
-          byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
-          readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
-          assertArrayEquals(data, readBuff);
-        }
+        ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
+            .getReadOnlyByteBuffersArray(
+                readChunkResponseProto.getDataBuffers().getBuffersList());
+        assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
+        byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
+        readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
+        assertArrayEquals(data, readBuff);
       } finally {
         xceiverClientManager.releaseClient(dnClient, false);
       }
@@ -749,10 +743,8 @@ public class TestContainerCommandsEC {
           // Delete the first index container
           XceiverClientSpi client = xceiverClientManager.acquireClient(
               p);
-          try {
-            ContainerProtocolCalls.deleteContainer(
-                client,
-                conID, true, cToken.encodeToUrlString());
+          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
+            containerClient.deleteContainer(conID, true);
           } finally {
             xceiverClientManager.releaseClient(client, false);
           }
@@ -796,11 +788,9 @@ public class TestContainerCommandsEC {
           checkBlockDataWithRetry(blockDataArrList.get(i), reconstructedBlockData, triggerRetry);
           XceiverClientSpi client = xceiverClientManager.acquireClient(
               newTargetPipeline);
-          try {
-            ContainerProtos.ReadContainerResponseProto readContainerResponse =
-                ContainerProtocolCalls.readContainer(
-                    client, conID,
-                    cToken.encodeToUrlString());
+          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
+            ReadContainerResponseProto readContainerResponse = containerClient.readContainer(conID);
+
             assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
                 readContainerResponse.getContainerData().getState());
           } finally {
@@ -852,8 +842,8 @@ public class TestContainerCommandsEC {
               .generateToken(ANY_USER, ContainerID.valueOf(entryContainerID));
           XceiverClientSpi client = xceiverClientManager.acquireClient(
               createSingleNodePipeline(entryPipeline, key, value));
-          try {
-            ContainerProtocolCalls.closeContainer(client, entryContainerID, cToken.encodeToUrlString());
+          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
+            containerClient.closeContainer(entryContainerID);
           } finally {
             xceiverClientManager.releaseClient(client, false);
           }
