@@ -23,11 +23,7 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
-import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
-import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.hadoop.hdds.scm.*;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.common.ChunkBuffer;
@@ -38,21 +34,13 @@ import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-
-import static org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls.putBlockAsync;
 
 /**
  * Handles the chunk EC writes for an EC internal block.
@@ -269,10 +257,11 @@ public class ECBlockOutputStream extends BlockOutputStream {
 
     CompletableFuture<ContainerProtos.
         ContainerCommandResponseProto> flushFuture;
-    try {
+    try (ContainerApi containerClient = new ContainerApiImpl(getXceiverClient(), getToken())) {
       ContainerProtos.BlockData blockData = getContainerBlockData().build();
-      XceiverClientReply asyncReply =
-          putBlockAsync(getXceiverClient(), blockData, close, getTokenString());
+
+      XceiverClientReply asyncReply = containerClient.putBlockAsync(blockData, close);
+
       CompletableFuture<ContainerProtos.ContainerCommandResponseProto> future =
           asyncReply.getResponse();
       flushFuture = future.thenApplyAsync(e -> {
@@ -307,7 +296,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
       return null;
     }
     this.putBlkRspFuture = flushFuture;
-    return flushFuture.thenApply(r -> new PutBlockResult(0, 0, r));
+    return flushFuture.thenApply(r -> new PutBlockResult(0, r));
   }
 
   /**

@@ -21,12 +21,12 @@ package org.apache.hadoop.hdds.scm.storage;
 
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetCommittedBlockLengthResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
+import org.apache.hadoop.hdds.scm.XceiverClientReply;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Interface for communication with a datanode.
@@ -38,6 +38,12 @@ public interface ContainerApi extends AutoCloseable {
   GetBlockResponseProto getBlock(BlockID blockId, Map<DatanodeDetails, Integer> replicaIndexes) throws IOException;
 
   GetCommittedBlockLengthResponseProto getCommittedBlockLength(BlockID blockId) throws IOException;
+
+  XceiverClientReply putBlockAsync(BlockData containerBlockData, boolean eof) throws IOException, ExecutionException, InterruptedException;
+
+  FinalizeBlockResponseProto finalizeBlock(DatanodeBlockID blockId) throws IOException;
+
+  ReadChunkResponseProto readChunk(ChunkInfo chunk, DatanodeBlockID blockId) throws IOException;
 
   @Override
   void close();

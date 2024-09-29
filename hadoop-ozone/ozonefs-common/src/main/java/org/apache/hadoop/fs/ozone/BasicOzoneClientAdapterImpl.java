@@ -29,7 +29,7 @@ import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.FinalizeBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetCommittedBlockLengthResponseProto;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
@@ -39,7 +39,6 @@ import org.apache.hadoop.hdds.scm.pipeline.Pipeline.PipelineState;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.ContainerApi;
 import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReport;
 import org.apache.hadoop.io.Text;
@@ -725,10 +724,11 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
       // If pipeline is still open
       if (pipeline.isOpen()) {
         client = xceiverClientFactory.acquireClient(pipeline);
-        ContainerProtos.FinalizeBlockResponseProto finalizeBlockResponseProto =
-            ContainerProtocolCalls.finalizeBlock(client, block.getBlockID().getDatanodeBlockIDProtobuf(),
-                block.getToken());
-        return BlockData.getFromProtoBuf(finalizeBlockResponseProto.getBlockData()).getSize();
+        try (ContainerApi containerClient = new ContainerApiImpl(client, block.getToken())) {
+          FinalizeBlockResponseProto finalizeBlockResponseProto =
+              containerClient.finalizeBlock(block.getBlockID().getDatanodeBlockIDProtobuf());
+          return BlockData.getFromProtoBuf(finalizeBlockResponseProto.getBlockData()).getSize();
+        }
       }
     } catch (IOException e) {
       LOG.warn("Failed to execute finalizeBlock command", e);

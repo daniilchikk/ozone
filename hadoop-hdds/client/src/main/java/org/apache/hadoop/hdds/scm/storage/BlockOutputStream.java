@@ -17,6 +17,30 @@
  */
 
 package org.apache.hadoop.hdds.scm.storage;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.KeyValue;
+import org.apache.hadoop.hdds.scm.*;
+import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.hadoop.ozone.common.Checksum;
+import org.apache.hadoop.ozone.common.ChecksumData;
+import org.apache.hadoop.ozone.common.ChunkBuffer;
+import org.apache.hadoop.ozone.common.OzoneChecksumException;
+import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.TokenIdentifier;
+import org.apache.hadoop.util.DirectBufferPool;
+import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.BufferOverflowException;
@@ -32,40 +56,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import org.apache.hadoop.hdds.client.BlockID;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.KeyValue;
-import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
-import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientReply;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.ozone.common.Checksum;
-import org.apache.hadoop.ozone.common.ChecksumData;
-import org.apache.hadoop.ozone.common.ChunkBuffer;
-import org.apache.hadoop.ozone.common.OzoneChecksumException;
-import org.apache.hadoop.security.token.Token;
-import org.apache.hadoop.security.token.TokenIdentifier;
-import org.apache.hadoop.util.DirectBufferPool;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-
 import static org.apache.hadoop.hdds.DatanodeVersion.COMBINED_PUTBLOCK_WRITECHUNK_RPC;
-import static org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls.putBlockAsync;
 import static org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls.writeChunkAsync;
 import static org.apache.hadoop.ozone.OzoneConsts.INCREMENTAL_CHUNK_LIST;
-
-import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * An {@link OutputStream} used by the REST service in combination with the
@@ -336,6 +329,10 @@ public class BlockOutputStream extends OutputStream {
     return this.pipeline;
   }
 
+  protected Token<? extends TokenIdentifier> getToken() {
+    return token;
+  }
+
   protected String getTokenString() {
     return this.tokenString;
   }
@@ -578,7 +575,7 @@ public class BlockOutputStream extends OutputStream {
 
     final CompletableFuture<ContainerCommandResponseProto> flushFuture;
     final XceiverClientReply asyncReply;
-    try {
+    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
       BlockData blockData = containerBlockData.build();
       LOG.debug("sending PutBlock {} flushPos {}", blockData, flushPos);
 
@@ -590,7 +587,8 @@ public class BlockOutputStream extends OutputStream {
 
       // if block is full, send the eof
       boolean isBlockFull = (blockSize != -1 && flushPos == blockSize);
-      asyncReply = putBlockAsync(xceiverClient, blockData, close || isBlockFull, tokenString);
+      asyncReply = containerClient.putBlockAsync(blockData, close || isBlockFull);
+
       CompletableFuture<ContainerCommandResponseProto> future = asyncReply.getResponse();
       flushFuture = future.thenApplyAsync(e -> {
         try {
@@ -1205,13 +1203,11 @@ public class BlockOutputStream extends OutputStream {
     return replicationIndex;
   }
 
-  static class PutBlockResult {
-    private final long flushPosition;
+  public static class PutBlockResult {
     private final long commitIndex;
     private final ContainerCommandResponseProto response;
 
-    PutBlockResult(long flushPosition, long commitIndex, ContainerCommandResponseProto response) {
-      this.flushPosition = flushPosition;
+    PutBlockResult(long commitIndex, ContainerCommandResponseProto response) {
       this.commitIndex = commitIndex;
       this.response = response;
     }

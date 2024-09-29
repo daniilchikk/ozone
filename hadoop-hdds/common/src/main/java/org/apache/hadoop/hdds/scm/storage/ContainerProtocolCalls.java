@@ -18,15 +18,6 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.function.Function;
-
 import io.opentracing.Scope;
 import io.opentracing.Span;
 import io.opentracing.util.GlobalTracer;
@@ -34,29 +25,7 @@ import org.apache.hadoop.hdds.annotation.InterfaceStability;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.CloseContainerRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetSmallFileRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetSmallFileResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.KeyValue;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutBlockRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutSmallFileRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutSmallFileResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.FinalizeBlockRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.EchoRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.EchoResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi.Validator;
@@ -69,12 +38,16 @@ import org.apache.hadoop.hdds.tracing.TracingUtil;
 import org.apache.hadoop.ozone.common.Checksum;
 import org.apache.hadoop.ozone.common.ChecksumData;
 import org.apache.hadoop.security.token.Token;
-
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.ratis.util.function.CheckedFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.BLOCK_TOKEN_VERIFICATION_FAILED;
@@ -124,94 +97,6 @@ public final class ContainerProtocolCalls  {
         }
       }
     }
-  }
-
-  /**
-   * Calls the container protocol to get the length of a committed block.
-   *
-   * @param xceiverClient client to perform call
-   * @param blockID blockId for the Block
-   * @param token a token for this block (may be null)
-   * @return container protocol getLastCommittedBlockLength response
-   * @throws IOException if there is an I/O error while performing the call
-   */
-  public static ContainerProtos.GetCommittedBlockLengthResponseProto
-      getCommittedBlockLength(
-      XceiverClientSpi xceiverClient, BlockID blockID,
-      Token<OzoneBlockTokenIdentifier> token)
-      throws IOException {
-    ContainerProtos.GetCommittedBlockLengthRequestProto.Builder
-        getBlockLengthRequestBuilder =
-        ContainerProtos.GetCommittedBlockLengthRequestProto.newBuilder().
-            setBlockID(blockID.getDatanodeBlockIDProtobuf());
-    String id = xceiverClient.getPipeline().getFirstNode().getUuidString();
-    ContainerCommandRequestProto.Builder builder =
-        ContainerCommandRequestProto.newBuilder()
-            .setCmdType(Type.GetCommittedBlockLength)
-            .setContainerID(blockID.getContainerID())
-            .setDatanodeUuid(id)
-            .setGetCommittedBlockLength(getBlockLengthRequestBuilder);
-    if (token != null) {
-      builder.setEncodedToken(token.encodeToUrlString());
-    }
-    String traceId = TracingUtil.exportCurrentSpan();
-    if (traceId != null) {
-      builder.setTraceID(traceId);
-    }
-    ContainerCommandRequestProto request = builder.build();
-    ContainerCommandResponseProto response =
-        xceiverClient.sendCommand(request, getValidatorList());
-    return response.getGetCommittedBlockLength();
-  }
-
-  /**
-   * Calls the container protocol to put a container block.
-   *
-   * @param xceiverClient client to perform call
-   * @param containerBlockData block data to identify container
-   * @param eof whether this is the last putBlock for the same block
-   * @param tokenString a serialized token for this block (may be null)
-   * @return putBlockResponse
-   * @throws IOException if there is an error while performing the call
-   */
-  public static XceiverClientReply putBlockAsync(XceiverClientSpi xceiverClient,
-                                                 BlockData containerBlockData,
-                                                 boolean eof,
-                                                 String tokenString)
-      throws IOException, InterruptedException, ExecutionException {
-    final ContainerCommandRequestProto request = getPutBlockRequest(
-        xceiverClient.getPipeline(), containerBlockData, eof, tokenString);
-    return xceiverClient.sendCommandAsync(request);
-  }
-
-  /**
-   * Calls the container protocol to finalize a container block.
-   *
-   * @param xceiverClient client to perform call
-   * @param blockID block ID to identify block
-   * @param token a token for this block (may be null)
-   * @return FinalizeBlockResponseProto
-   * @throws IOException if there is an I/O error while performing the call
-   */
-  public static ContainerProtos.FinalizeBlockResponseProto finalizeBlock(
-      XceiverClientSpi xceiverClient, DatanodeBlockID blockID,
-      Token<OzoneBlockTokenIdentifier> token)
-      throws IOException {
-    FinalizeBlockRequestProto.Builder finalizeBlockRequest =
-        FinalizeBlockRequestProto.newBuilder().setBlockID(blockID);
-    String id = xceiverClient.getPipeline().getFirstNode().getUuidString();
-    ContainerCommandRequestProto.Builder builder =
-        ContainerCommandRequestProto.newBuilder().setCmdType(Type.FinalizeBlock)
-            .setContainerID(blockID.getContainerID())
-            .setDatanodeUuid(id)
-            .setFinalizeBlock(finalizeBlockRequest);
-    if (token != null) {
-      builder.setEncodedToken(token.encodeToUrlString());
-    }
-    ContainerCommandRequestProto request = builder.build();
-    ContainerCommandResponseProto response =
-        xceiverClient.sendCommand(request, getValidatorList());
-    return response.getFinalizeBlock();
   }
 
   public static ContainerCommandRequestProto getPutBlockRequest(

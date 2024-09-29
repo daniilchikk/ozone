@@ -120,6 +120,38 @@ class ContainerApiHelper {
         .build();
   }
 
+  ContainerCommandRequestProto createPutBlockRequest(BlockData containerBlockData, boolean eof) {
+    PutBlockRequestProto.Builder createBlockRequest =
+        PutBlockRequestProto.newBuilder()
+            .setBlockData(containerBlockData)
+            .setEof(eof);
+
+    return createContainerCommandRequestBuilder(PutBlock, containerBlockData.getBlockID().getContainerID())
+        .setPutBlock(createBlockRequest)
+        .build();
+  }
+
+  public ContainerCommandRequestProto createFinalizeBlockRequest(DatanodeBlockID blockId) {
+    FinalizeBlockRequestProto.Builder finalizeBlockRequest = FinalizeBlockRequestProto.newBuilder().setBlockID(blockId);
+
+    return createContainerCommandRequestBuilder(FinalizeBlock, blockId.getContainerID())
+        .setFinalizeBlock(finalizeBlockRequest)
+        .build();
+  }
+
+  public ContainerCommandRequestProto createReadChunkRequest(ChunkInfo chunk, DatanodeBlockID blockId) {
+    ReadChunkRequestProto readChunkRequest =
+        ReadChunkRequestProto.newBuilder()
+            .setBlockID(blockId)
+            .setChunkData(chunk)
+            .setReadChunkVersion(ContainerProtos.ReadChunkVersion.V1)
+            .build();
+
+    return createContainerCommandRequestBuilder(PutBlock, blockId.getContainerID())
+        .setReadChunk(readChunkRequest)
+        .build();
+  }
+
   private ContainerCommandRequestProto.Builder createContainerCommandRequestBuilder(ContainerProtos.Type type,
       long containerId) {
 
