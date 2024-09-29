@@ -19,16 +19,16 @@
 package org.apache.hadoop.hdds.scm.storage;
 
 import jakarta.annotation.Nullable;
+import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerRequestProto;
-import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type.*;
 
@@ -52,7 +52,7 @@ class ContainerApiHelper {
   }
 
   ContainerCommandRequestProto createListBlockRequest(long containerId, Long startLocalId, int count) {
-    ContainerProtos.ListBlockRequestProto.Builder listBlockBuilder = ContainerProtos.ListBlockRequestProto.newBuilder()
+    ListBlockRequestProto.Builder listBlockBuilder = ListBlockRequestProto.newBuilder()
         .setCount(count);
 
     if (startLocalId != null) {
@@ -69,8 +69,25 @@ class ContainerApiHelper {
     return containerCommandBuilder.build();
   }
 
+  ContainerCommandRequestProto createGetBlockRequest(long containerId, BlockID blockId,
+      Map<DatanodeDetails, Integer> replicaIndexes, DatanodeDetails datanode) {
+
+    DatanodeBlockID.Builder datanodeBlockID = blockId.getDatanodeBlockIDProtobufBuilder();
+    int replicaIndex = replicaIndexes.getOrDefault(datanode, 0);
+    if (replicaIndex > 0) {
+      datanodeBlockID.setReplicaIndex(replicaIndex);
+    }
+
+    GetBlockRequestProto.Builder readBlockRequest = GetBlockRequestProto.newBuilder()
+        .setBlockID(datanodeBlockID.build());
+
+    return createContainerCommandRequestBuilder(GetBlock, containerId)
+            .setGetBlock(readBlockRequest)
+            .build();
+  }
+
   ContainerCommandRequestProto createGetBlockRequest(DatanodeBlockID datanodeBlockId) {
-    ContainerProtos.GetBlockRequestProto.Builder readBlockRequest = ContainerProtos.GetBlockRequestProto
+    GetBlockRequestProto.Builder readBlockRequest = GetBlockRequestProto
         .newBuilder()
         .setBlockID(datanodeBlockId);
 

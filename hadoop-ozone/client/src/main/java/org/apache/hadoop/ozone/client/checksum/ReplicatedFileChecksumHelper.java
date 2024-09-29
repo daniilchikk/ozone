@@ -22,11 +22,13 @@ import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.io.MD5Hash;
 import org.apache.hadoop.ozone.client.OzoneBucket;
@@ -150,14 +152,15 @@ public class ReplicatedFileChecksumHelper extends BaseFileChecksumHelper {
             blockID.getContainerID());
       }
       xceiverClientSpi = getXceiverClientFactory().acquireClientForReadData(pipeline);
-      ContainerProtos.GetBlockResponseProto response = ContainerProtocolCalls
-          .getBlock(xceiverClientSpi, blockID, token, pipeline.getReplicaIndexes());
 
-      chunks = response.getBlockData().getChunksList();
+      try (ContainerApi containerClient = new ContainerApiImpl(xceiverClientSpi, token)) {
+        GetBlockResponseProto response = containerClient.getBlock(blockID, pipeline.getReplicaIndexes());
+
+        chunks = response.getBlockData().getChunksList();
+      }
     } finally {
       if (xceiverClientSpi != null) {
-        getXceiverClientFactory().releaseClientForReadData(
-            xceiverClientSpi, false);
+        getXceiverClientFactory().releaseClientForReadData(xceiverClientSpi, false);
       }
     }
 

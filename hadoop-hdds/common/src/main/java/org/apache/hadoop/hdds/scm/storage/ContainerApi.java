@@ -19,9 +19,13 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * Interface for communication with a datanode.
@@ -29,6 +33,8 @@ import java.io.IOException;
  */
 public interface ContainerApi extends AutoCloseable {
   ListBlockResponseProto listBlock(long containerId, Long startLocalId, int count) throws IOException;
+
+  GetBlockResponseProto getBlock(BlockID blockId, Map<DatanodeDetails, Integer> replicaIndexes) throws IOException;
 
   @Override
   void close();

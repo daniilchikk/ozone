@@ -18,48 +18,81 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import io.opentracing.Span;
+import io.opentracing.util.GlobalTracer;
 import jakarta.annotation.Nullable;
+import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.container.common.helpers.BlockNotCommittedException;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerNotOpenException;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
+import org.apache.ratis.util.function.CheckedFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 import static java.util.Collections.singletonList;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.*;
 
 public class ContainerApiImpl implements ContainerApi {
+  private static final Logger LOG = LoggerFactory.getLogger(ContainerApiImpl.class);
 
-  private static final List<XceiverClientSpi.Validator> VALIDATORS = createValidators();
+  private static final List<XceiverClientSpi.Validator> DEFAULT_VALIDATORS = createValidators();
 
   private final XceiverClientSpi client;
 
   private final ContainerApiHelper requestHelper;
 
+  private final List<XceiverClientSpi.Validator> validators;
+
   public ContainerApiImpl(XceiverClientSpi client, @Nullable Token<? extends TokenIdentifier> token)
       throws IOException {
+    this(client, token, DEFAULT_VALIDATORS);
+  }
+
+  public ContainerApiImpl(XceiverClientSpi client, @Nullable Token<? extends TokenIdentifier> token,
+      List<XceiverClientSpi.Validator> validators) throws IOException {
     this.client = client;
 
     String firstDatanodeUuid = client.getPipeline().getFirstNode().getUuidString();
     this.requestHelper = new ContainerApiHelper(firstDatanodeUuid, token);
+    this.validators = validators;
   }
 
   @Override
   public ListBlockResponseProto listBlock(long containerId, Long startLocalId, int count) throws IOException {
     ContainerCommandRequestProto request = requestHelper.createListBlockRequest(containerId, startLocalId, count);
 
-    return client.sendCommand(request, getValidatorList()).getListBlock();
+    return client.sendCommand(request, validators).getListBlock();
   }
 
-  private static List<XceiverClientSpi.Validator> getValidatorList() {
-    return VALIDATORS;
+  @Override
+  public GetBlockResponseProto getBlock(BlockID blockId, Map<DatanodeDetails, Integer> replicaIndexes)
+      throws IOException {
+    return tryEachDatanode(client.getPipeline(),
+        d -> getBlock(blockId, d, replicaIndexes),
+        d -> toErrorMessage(blockId, d));
+  }
+
+  private GetBlockResponseProto getBlock(BlockID blockId, DatanodeDetails datanode,
+      Map<DatanodeDetails, Integer> replicaIndexes) throws IOException {
+
+    ContainerCommandRequestProto request =
+        requestHelper.createGetBlockRequest(blockId.getContainerID(), blockId, replicaIndexes, datanode);
+
+    return client.sendCommand(request, validators).getGetBlock();
   }
 
   private static List<XceiverClientSpi.Validator> createValidators() {
@@ -74,6 +107,44 @@ public class ContainerApiImpl implements ContainerApi {
     } else if (response.getResult() != SUCCESS) {
       throw new StorageContainerException(response.getMessage(), response.getResult());
     }
+  }
+  static <T> T tryEachDatanode(Pipeline pipeline, CheckedFunction<DatanodeDetails, T, IOException> operation,
+      Function<DatanodeDetails, String> toErrorMessage) throws IOException {
+
+    IOException lastException = null;
+
+    for (DatanodeDetails datanode : pipeline.getNodesInOrder()) {
+      try {
+        return operation.apply(datanode);
+      } catch (IOException e) {
+        Span span = GlobalTracer.get().activeSpan();
+        if (e instanceof StorageContainerException) {
+          StorageContainerException sce = (StorageContainerException) e;
+          // Block token expired. There's no point retrying other DN.
+          // Throw the exception to request a new block token right away.
+          if (sce.getResult() == BLOCK_TOKEN_VERIFICATION_FAILED) {
+            span.log("block token verification failed at DN " + datanode);
+            throw e;
+          }
+        }
+        span.log("failed to connect to DN " + datanode);
+        LOG.warn("{}; will try another datanode.", toErrorMessage.apply(datanode), e);
+        lastException = e;
+      }
+    }
+
+    if (lastException != null) {
+      throw lastException;
+    } else {
+      throw new IOException("No datanode available");
+    }
+  }
+
+  private static String toErrorMessage(BlockID blockId, DatanodeDetails datanode) {
+    return String.format("Failed to get block #%s in container #%s from %s",
+        blockId.getLocalID(),
+        blockId.getContainerID(),
+        datanode);
   }
 
   @Override

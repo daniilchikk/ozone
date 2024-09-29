@@ -23,11 +23,13 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.io.MD5Hash;
 import org.apache.hadoop.ozone.client.OzoneBucket;
@@ -46,8 +48,6 @@ import java.util.List;
  * The helper class to compute file checksum for EC files.
  */
 public class ECFileChecksumHelper extends BaseFileChecksumHelper {
-  private int blockIdx;
-
   public ECFileChecksumHelper(OzoneVolume volume, OzoneBucket bucket,
       String keyName, long length, OzoneClientConfig.ChecksumCombineMode
       checksumCombineMode, ClientProtocol rpcClient, OmKeyInfo keyInfo)
@@ -59,6 +59,7 @@ public class ECFileChecksumHelper extends BaseFileChecksumHelper {
   @Override
   protected void checksumBlocks() throws IOException {
     long currentLength = 0;
+    int blockIdx;
     for (blockIdx = 0;
          blockIdx < getKeyLocationInfoList().size() && getRemaining() >= 0;
          blockIdx++) {
@@ -188,10 +189,11 @@ public class ECFileChecksumHelper extends BaseFileChecksumHelper {
       }
       xceiverClientSpi = getXceiverClientFactory().acquireClientForReadData(pipeline);
 
-      ContainerProtos.GetBlockResponseProto response = ContainerProtocolCalls
-          .getBlock(xceiverClientSpi, blockID, token, pipeline.getReplicaIndexes());
+      try (ContainerApi containerClient = new ContainerApiImpl(xceiverClientSpi, token)) {
+        GetBlockResponseProto response = containerClient.getBlock(blockID, pipeline.getReplicaIndexes());
 
-      chunks = response.getBlockData().getChunksList();
+        chunks = response.getBlockData().getChunksList();
+      }
     } finally {
       if (xceiverClientSpi != null) {
         getXceiverClientFactory().releaseClientForReadData(

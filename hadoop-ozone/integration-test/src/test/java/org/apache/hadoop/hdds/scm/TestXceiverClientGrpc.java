@@ -17,10 +17,6 @@
  */
 package org.apache.hadoop.hdds.scm;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-
 import org.apache.commons.lang3.RandomUtils;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.client.RatisReplicationConfig;
@@ -33,6 +29,8 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
+import org.apache.hadoop.hdds.scm.storage.ContainerApi;
+import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +43,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
  * Tests for TestXceiverClientGrpc, to ensure topology aware reads work
@@ -237,12 +239,15 @@ public class TestXceiverClientGrpc {
 
   private void invokeXceiverClientGetBlock(XceiverClientSpi client)
       throws IOException {
-    ContainerProtocolCalls.getBlock(client,
-        BlockID.getFromProtobuf(ContainerProtos.DatanodeBlockID.newBuilder()
-            .setContainerID(1)
-            .setLocalID(1)
-            .setBlockCommitSequenceId(1)
-            .build()), null, client.getPipeline().getReplicaIndexes());
+    try (ContainerApi containerApi = new ContainerApiImpl(client, null)) {
+      containerApi.getBlock(
+          BlockID.getFromProtobuf(ContainerProtos.DatanodeBlockID.newBuilder()
+              .setContainerID(1)
+              .setLocalID(1)
+              .setBlockCommitSequenceId(1)
+              .build()),
+          client.getPipeline().getReplicaIndexes());
+    }
   }
 
   private void invokeXceiverClientReadChunk(XceiverClientSpi client)
