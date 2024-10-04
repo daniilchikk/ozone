@@ -129,8 +129,16 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
     OzoneConfiguration ozoneConfiguration = getConf();
 
     try (Writer writer = createReportWriter(output);
-         OzoneFsckHandler handler =
-             new OzoneFsckHandler(address, verboseSettings, writer, delete, client, ozoneConfiguration)) {
+         OzoneFsckHandler handler = OzoneFsckHandler handler = new OzoneFsckHandler(
+             volumePrefix,
+             bucketPrefix,
+             keyPrefix,
+             verboseSettings,
+             writer,
+             delete,
+             client,
+             ozoneConfiguration
+    )) {
       try {
         handler.scan();
       } finally {

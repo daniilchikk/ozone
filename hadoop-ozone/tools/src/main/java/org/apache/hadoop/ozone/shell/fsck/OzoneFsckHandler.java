@@ -54,7 +54,12 @@ import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.S
  * It traverses volumes, buckets, and keys to detect and optionally delete corrupted keys.
  */
 public class OzoneFsckHandler implements AutoCloseable {
-  private final OzoneAddress address;
+
+  private final String volumePrefix;
+
+  private final String bucketPrefix;
+
+  private final String keyPrefix;
 
   private final OzoneFsckVerboseSettings verboseSettings;
 
@@ -70,9 +75,19 @@ public class OzoneFsckHandler implements AutoCloseable {
 
   private final XceiverClientManager xceiverClientManager;
 
-  public OzoneFsckHandler(OzoneAddress address, OzoneFsckVerboseSettings verboseSettings, Writer writer,
-      boolean deleteCorruptedKeys, OzoneClient client, OzoneConfiguration ozoneConfiguration) throws IOException {
-    this.address = address;
+  public OzoneFsckHandler(
+      String volumePrefix,
+      String bucketPrefix,
+      String keyPrefix,
+      OzoneFsckVerboseSettings verboseSettings,
+      Writer writer,
+      boolean deleteCorruptedKeys,
+      OzoneClient client,
+      OzoneConfiguration ozoneConfiguration
+  ) throws IOException {
+    this.volumePrefix = volumePrefix;
+    this.bucketPrefix = bucketPrefix;
+    this.keyPrefix = keyPrefix;
     this.verboseSettings = verboseSettings;
     this.writer = writer;
     this.deleteCorruptedKeys = deleteCorruptedKeys;
@@ -92,7 +107,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanVolumes() throws IOException {
-    Iterator<? extends OzoneVolume> volumes = client.getObjectStore().listVolumes(address.getVolumeName());
+    Iterator<? extends OzoneVolume> volumes = client.getObjectStore().listVolumes(volumePrefix);
 
     while (volumes.hasNext()) {
       scanBuckets(volumes.next());
@@ -100,7 +115,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanBuckets(OzoneVolume volume) throws IOException {
-    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(address.getBucketName());
+    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(bucketPrefix);
 
     while (buckets.hasNext()) {
       scanKeys(buckets.next());
@@ -108,7 +123,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanKeys(OzoneBucket bucket) throws IOException {
-    Iterator<? extends OzoneKey> keys = bucket.listKeys(address.getKeyName());
+    Iterator<? extends OzoneKey> keys = bucket.listKeys(keyPrefix);
 
     while (keys.hasNext()) {
       scanKey(keys.next());
