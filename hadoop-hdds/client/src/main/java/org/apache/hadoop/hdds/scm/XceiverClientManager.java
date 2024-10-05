@@ -5,22 +5,24 @@
  * regarding copyright ownership.  The ASF licenses this file
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
- *  with the License.  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * with the License.  You may obtain a copy of the License at
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hadoop.hdds.scm;
 
-import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-
+import com.google.common.base.Preconditions;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
 import org.apache.hadoop.hdds.conf.Config;
 import org.apache.hadoop.hdds.conf.ConfigGroup;
 import org.apache.hadoop.hdds.conf.ConfigType;
@@ -29,22 +31,20 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.hadoop.ozone.OzoneConfigKeys;
+import org.apache.hadoop.ozone.OzoneSecurityUtil;
+import org.apache.hadoop.ozone.util.CacheMetrics;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.RemovalListener;
-import com.google.common.cache.RemovalNotification;
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
+
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.hadoop.hdds.conf.ConfigTag.OZONE;
 import static org.apache.hadoop.hdds.conf.ConfigTag.PERFORMANCE;
 import static org.apache.hadoop.hdds.scm.exceptions.SCMException.ResultCodes.NO_REPLICA_FOUND;
-
-import org.apache.hadoop.ozone.util.CacheMetrics;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * XceiverClientManager is responsible for the lifecycle of XceiverClient
@@ -58,7 +58,7 @@ import org.slf4j.LoggerFactory;
  * without reestablishing connection. But the connection will be closed if
  * not being used for a period of time.
  */
-public class XceiverClientManager extends XceiverClientCreator {
+public class XceiverClientManager implements XceiverClientFactory {
   private static final Logger LOG =
       LoggerFactory.getLogger(XceiverClientManager.class);
 
@@ -66,6 +66,14 @@ public class XceiverClientManager extends XceiverClientCreator {
   private final CacheMetrics cacheMetrics;
 
   private static XceiverClientMetrics metrics;
+
+  private final ConfigurationSource conf;
+
+  private final ClientTrustManager trustManager;
+
+  private final boolean securityEnabled;
+
+  private final boolean topologyAwareRead;
 
   /**
    * Creates a new XceiverClientManager for non secured ozone cluster.
@@ -81,7 +89,7 @@ public class XceiverClientManager extends XceiverClientCreator {
   public XceiverClientManager(ConfigurationSource conf,
       ScmClientConfig clientConf,
       ClientTrustManager trustManager) throws IOException {
-    super(conf, trustManager);
+
     Preconditions.checkNotNull(clientConf);
     Preconditions.checkNotNull(conf);
     long staleThresholdMs = clientConf.getStaleThreshold(MILLISECONDS);
@@ -93,9 +101,7 @@ public class XceiverClientManager extends XceiverClientCreator {
         .removalListener(
             new RemovalListener<String, XceiverClientSpi>() {
             @Override
-            public void onRemoval(
-                RemovalNotification<String, XceiverClientSpi>
-                  removalNotification) {
+            public void onRemoval(RemovalNotification<String, XceiverClientSpi> removalNotification) {
               synchronized (clientCache) {
                 // Mark the entry as evicted
                 XceiverClientSpi info = removalNotification.getValue();
@@ -105,11 +111,48 @@ public class XceiverClientManager extends XceiverClientCreator {
           }).build();
 
     cacheMetrics = CacheMetrics.create(clientCache, this);
+    this.conf = conf;
+    this.trustManager = trustManager;
+    this.securityEnabled = OzoneSecurityUtil.isSecurityEnabled(conf);
+    if (securityEnabled) {
+      Preconditions.checkNotNull(trustManager);
+    }
+    this.topologyAwareRead = conf.getBoolean(
+        OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_KEY,
+        OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_DEFAULT);
   }
 
-  @VisibleForTesting
-  public Cache<String, XceiverClientSpi> getClientCache() {
-    return clientCache;
+  protected XceiverClientSpi newClient(Pipeline pipeline) throws IOException {
+    XceiverClientSpi client;
+    switch (pipeline.getType()) {
+    case RATIS:
+      client = XceiverClientRatis.newXceiverClientRatis(pipeline, conf, trustManager, null);
+      break;
+    case STAND_ALONE:
+      client = new XceiverClientGrpc(pipeline, conf, trustManager);
+      break;
+    case EC:
+      client = new ECXceiverClientGrpc(pipeline, conf, trustManager);
+      break;
+    case CHAINED:
+    default:
+      throw new IOException("not implemented " + pipeline.getType());
+    }
+    try {
+      client.connect();
+    } catch (Exception e) {
+      throw new IOException(e);
+    }
+    return client;
+  }
+
+  public boolean isSecurityEnabled() {
+    return securityEnabled;
+  }
+
+  @Override
+  public XceiverClientSpi acquireClient(Pipeline pipeline) throws IOException {
+    return acquireClient(pipeline, false);
   }
 
   /**
@@ -119,8 +162,7 @@ public class XceiverClientManager extends XceiverClientCreator {
    * the cached otherwise create a new one.
    */
   @Override
-  public XceiverClientSpi acquireClient(Pipeline pipeline,
-      boolean topologyAware) throws IOException {
+  public XceiverClientSpi acquireClient(Pipeline pipeline, boolean topologyAware) throws IOException {
     Preconditions.checkNotNull(pipeline);
     Preconditions.checkArgument(pipeline.getNodes() != null);
     Preconditions.checkArgument(!pipeline.getNodes().isEmpty(),
@@ -134,8 +176,17 @@ public class XceiverClientManager extends XceiverClientCreator {
   }
 
   @Override
-  public void releaseClient(XceiverClientSpi client, boolean invalidateClient,
-      boolean topologyAware) {
+  public XceiverClientSpi acquireClientForReadData(Pipeline pipeline) throws IOException {
+    return acquireClient(pipeline);
+  }
+
+  @Override
+  public void releaseClient(XceiverClientSpi xceiverClient, boolean invalidateClient) {
+    releaseClient(xceiverClient, invalidateClient, false);
+  }
+
+  @Override
+  public void releaseClient(XceiverClientSpi client, boolean invalidateClient, boolean topologyAware) {
     Preconditions.checkNotNull(client);
     synchronized (clientCache) {
       client.decrementReference();
@@ -148,6 +199,11 @@ public class XceiverClientManager extends XceiverClientCreator {
         }
       }
     }
+  }
+
+  @Override
+  public void releaseClientForReadData(XceiverClientSpi xceiverClient, boolean invalidateClient) {
+    releaseClient(xceiverClient, invalidateClient, topologyAwareRead);
   }
 
   protected XceiverClientSpi getClient(Pipeline pipeline, boolean topologyAware)
@@ -236,15 +292,6 @@ public class XceiverClientManager extends XceiverClientCreator {
   }
 
   /**
-   * Reset xceiver client metric.
-   */
-  public static synchronized void resetXceiverClientMetrics() {
-    if (metrics != null) {
-      metrics.reset();
-    }
-  }
-
-  /**
    * Configuration for HDDS client.
    */
   @ConfigGroup(prefix = "scm.container.client")
@@ -284,7 +331,6 @@ public class XceiverClientManager extends XceiverClientCreator {
       return maxSize;
     }
 
-    @VisibleForTesting
     public void setMaxSize(int maxSize) {
       this.maxSize = maxSize;
     }

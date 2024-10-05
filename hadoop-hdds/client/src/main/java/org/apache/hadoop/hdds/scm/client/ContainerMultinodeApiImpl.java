@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.hdds.scm.storage;
+package org.apache.hadoop.hdds.scm.client;
 
 import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
@@ -80,6 +80,5 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
 
   @Override
   public void close() {
-    client.close();
   }
 }

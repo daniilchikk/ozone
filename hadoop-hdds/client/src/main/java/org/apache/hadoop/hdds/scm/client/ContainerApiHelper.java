@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.hdds.scm.storage;
+package org.apache.hadoop.hdds.scm.client;
 
 import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.client.BlockID;

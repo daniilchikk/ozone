@@ -20,7 +20,6 @@ package org.apache.hadoop.ozone.container.ec.reconstruction;
 import com.google.common.collect.ImmutableList;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
-import org.apache.commons.collections.map.SingletonMap;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
@@ -29,11 +28,10 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerD
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
-import org.apache.hadoop.hdds.scm.storage.ContainerApi;
-import org.apache.hadoop.hdds.scm.storage.ContainerApiImpl;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClient;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
@@ -44,6 +42,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -175,7 +174,7 @@ public class ECContainerOperationClient implements Closeable {
     return Pipeline.newBuilder().setId(PipelineID.valueOf(dn.getUuid()))
             .setReplicationConfig(repConfig).setNodes(ImmutableList.of(dn))
             .setState(Pipeline.PipelineState.CLOSED)
-            .setReplicaIndexes(new SingletonMap(dn, replicaIndex)).build();
+            .setReplicaIndexes(Collections.singletonMap(dn, replicaIndex)).build();
   }
 
   public XceiverClientManager getXceiverClientManager() {

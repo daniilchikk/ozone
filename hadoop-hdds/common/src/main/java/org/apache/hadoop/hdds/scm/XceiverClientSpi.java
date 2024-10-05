@@ -18,6 +18,14 @@
 
 package org.apache.hadoop.hdds.scm;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.hdds.HddsUtils;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.ratis.util.function.CheckedBiConsumer;
+
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
@@ -25,16 +33,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import org.apache.hadoop.hdds.HddsUtils;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.ratis.util.function.CheckedBiConsumer;
 
 /**
  * A Client for the storageContainer protocol.
@@ -148,7 +146,7 @@ public abstract class XceiverClientSpi implements Closeable {
     }
   }
 
-  public static IOException getIOExceptionForSendCommand(
+  static IOException getIOExceptionForSendCommand(
       ContainerCommandRequestProto request, Exception e) {
     return new IOException("Failed to execute command "
         + HddsUtils.processForDebug(request), e);
@@ -162,13 +160,6 @@ public abstract class XceiverClientSpi implements Closeable {
   public abstract XceiverClientReply
       sendCommandAsync(ContainerCommandRequestProto request)
       throws IOException, ExecutionException, InterruptedException;
-
-  /**
-   * Returns pipeline Type.
-   *
-   * @return - {Stand_Alone, Ratis or Chained}
-   */
-  public abstract HddsProtos.ReplicationType getPipelineType();
 
   /**
    * Check if an specific commitIndex is replicated to majority/all servers.
