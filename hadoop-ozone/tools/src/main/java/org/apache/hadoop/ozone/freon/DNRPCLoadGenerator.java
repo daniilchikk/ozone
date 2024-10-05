@@ -24,8 +24,8 @@ import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
@@ -157,11 +157,14 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
     if (OzoneSecurityUtil.isSecurityEnabled(configuration)) {
       omClient = createOmClient(configuration, null);
       CACertificateProvider caCerts = () -> omClient.getServiceInfo().provideCACerts();
-      xceiverClientManager = new XceiverClientCreator(configuration,
-          new ClientTrustManager(caCerts, null));
+      xceiverClientManager = new XceiverClientManager(
+          configuration,
+          configuration.getObject(XceiverClientManager.ScmClientConfig.class),
+          new ClientTrustManager(caCerts, null)
+      );
     } else {
       omClient = null;
-      xceiverClientManager = new XceiverClientCreator(configuration);
+      xceiverClientManager = new XceiverClientManager(configuration);
     }
     clients = new ArrayList<>(numClients);
     for (int i = 0; i < numClients; i++) {

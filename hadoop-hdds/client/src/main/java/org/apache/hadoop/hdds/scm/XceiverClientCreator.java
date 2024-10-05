@@ -42,10 +42,6 @@ public class XceiverClientCreator implements XceiverClientFactory {
   private final ClientTrustManager trustManager;
   private final boolean securityEnabled;
 
-  public XceiverClientCreator(ConfigurationSource conf) {
-    this(conf, null);
-  }
-
   public XceiverClientCreator(ConfigurationSource conf, ClientTrustManager trustManager) {
     this.conf = conf;
     this.securityEnabled = OzoneSecurityUtil.isSecurityEnabled(conf);

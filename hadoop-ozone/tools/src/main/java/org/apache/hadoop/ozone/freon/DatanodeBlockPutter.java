@@ -16,9 +16,8 @@
  */
 package org.apache.hadoop.ozone.freon;
 
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.Callable;
-
+import com.codahale.metrics.Timer;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
@@ -29,20 +28,20 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutBlockRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
-import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.common.Checksum;
-
-import com.codahale.metrics.Timer;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Callable;
 
 /**
  * Datanode test for block creation.
@@ -101,7 +100,7 @@ public class DatanodeBlockPutter extends BaseFreonGenerator implements
           findPipelineForTest(pipelineId, scmLocationClient, LOG);
 
       try (XceiverClientFactory xceiverClientManager =
-               new XceiverClientCreator(ozoneConf)) {
+               new XceiverClientManager(ozoneConf)) {
         client = xceiverClientManager.acquireClient(pipeline);
 
         timer = getMetrics().timer("put-block");

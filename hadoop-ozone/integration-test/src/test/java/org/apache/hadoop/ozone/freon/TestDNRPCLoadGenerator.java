@@ -22,8 +22,8 @@ import org.apache.hadoop.hdds.conf.DatanodeRatisServerConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.ratis.conf.RatisClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
@@ -81,7 +81,7 @@ public class TestDNRPCLoadGenerator {
         storageContainerLocationClient.allocateContainer(
             SCMTestUtils.getReplicationType(conf),
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
-    try (XceiverClientFactory factory = new XceiverClientCreator(conf);
+    try (XceiverClientFactory factory = new XceiverClientManager(conf);
          XceiverClientSpi client = factory.acquireClient(container.getPipeline());
          ContainerApi containerClient = new ContainerApiImpl(client, null)
     ) {

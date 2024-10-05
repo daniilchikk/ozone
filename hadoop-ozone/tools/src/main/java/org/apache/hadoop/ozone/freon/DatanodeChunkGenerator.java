@@ -16,16 +16,8 @@
  */
 package org.apache.hadoop.ozone.freon;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Set;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.Arrays;
-import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
-
+import com.codahale.metrics.Timer;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
@@ -36,22 +28,29 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerC
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkRequestProto;
-import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.common.Checksum;
-
-import com.codahale.metrics.Timer;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 /**
  * Data generator to use pure datanode XCeiver interface.
@@ -119,7 +118,7 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
     try (StorageContainerLocationProtocol scmLocationClient =
                createStorageContainerLocationClient(ozoneConf);
          XceiverClientFactory xceiverClientManager =
-             new XceiverClientCreator(ozoneConf)) {
+             new XceiverClientManager(ozoneConf)) {
       List<Pipeline> pipelinesFromSCM = scmLocationClient.listPipelines();
       Pipeline firstPipeline;
       init();

@@ -16,29 +16,28 @@
  */
 package org.apache.hadoop.ozone.freon;
 
-import java.io.IOException;
-import java.util.concurrent.Callable;
-
+import com.codahale.metrics.Timer;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.scm.XceiverClientCreator;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.common.Checksum;
 import org.apache.hadoop.ozone.common.ChecksumData;
-
-import com.codahale.metrics.Timer;
 import org.apache.hadoop.ozone.common.OzoneChecksumException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
+
+import java.io.IOException;
+import java.util.concurrent.Callable;
 
 /**
  * Data validator of chunks to use pure datanode XCeiver interface.
@@ -93,7 +92,7 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
       Pipeline pipeline = findPipelineForTest(pipelineId, scmClient, LOG);
 
       try (XceiverClientFactory xceiverClientManager =
-                   new XceiverClientCreator(ozoneConf)) {
+                   new XceiverClientManager(ozoneConf)) {
         xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
 
         checksumProtobuf = ContainerProtos.ChecksumData.newBuilder()
