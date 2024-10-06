@@ -28,6 +28,7 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
@@ -61,7 +62,7 @@ public class ECBlockInputStream extends BlockExtendedInputStream {
   private final int ecChunkSize;
   private final long stripeSize;
   private final BlockInputStreamFactory streamFactory;
-  private final XceiverClientFactory xceiverClientFactory;
+  private final ContainerApiManager containerApiManager;
   private final Function<BlockID, BlockLocationInfo> refreshFunction;
   private final BlockLocationInfo blockInfo;
   private final DatanodeDetails[] dataLocations;
@@ -109,7 +110,7 @@ public class ECBlockInputStream extends BlockExtendedInputStream {
 
   public ECBlockInputStream(ECReplicationConfig repConfig,
       BlockLocationInfo blockInfo,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
       BlockInputStreamFactory streamFactory,
       OzoneClientConfig config) {
@@ -117,7 +118,7 @@ public class ECBlockInputStream extends BlockExtendedInputStream {
     this.ecChunkSize = repConfig.getEcChunkSize();
     this.blockInfo = blockInfo;
     this.streamFactory = streamFactory;
-    this.xceiverClientFactory = xceiverClientFactory;
+    this.containerApiManager = containerApiManager;
     this.refreshFunction = refreshFunction;
     this.maxLocations = repConfig.getData() + repConfig.getParity();
     this.dataLocations = new DatanodeDetails[repConfig.getRequiredNodes()];
@@ -191,7 +192,7 @@ public class ECBlockInputStream extends BlockExtendedInputStream {
           StandaloneReplicationConfig.getInstance(
               HddsProtos.ReplicationFactor.ONE),
           blkInfo, pipeline,
-          blockInfo.getToken(), xceiverClientFactory,
+          blockInfo.getToken(), containerApiManager,
           ecPipelineRefreshFunction(locationIndex + 1, refreshFunction),
           config);
       blockStreams[locationIndex] = stream;

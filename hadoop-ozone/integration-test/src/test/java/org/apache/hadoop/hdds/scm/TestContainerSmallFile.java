@@ -20,11 +20,12 @@ package org.apache.hadoop.hdds.scm;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.EchoResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
 import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.ozone.OzoneConsts;
@@ -48,7 +49,7 @@ public class TestContainerSmallFile {
   private static OzoneConfiguration ozoneConfig;
   private static StorageContainerLocationProtocolClientSideTranslatorPB
       storageContainerLocationClient;
-  private static XceiverClientManager xceiverClientManager;
+  private static ContainerApiManager containerApiManager;
 
   @BeforeAll
   public static void init() throws Exception {
@@ -60,7 +61,7 @@ public class TestContainerSmallFile {
     cluster.waitForClusterToBeReady();
     storageContainerLocationClient = cluster
         .getStorageContainerLocationClient();
-    xceiverClientManager = new XceiverClientManager(ozoneConfig);
+    containerApiManager = new ContainerApiManagerImpl();
   }
 
   @AfterAll
@@ -77,16 +78,13 @@ public class TestContainerSmallFile {
         SCMTestUtils.getReplicationType(ozoneConfig),
         HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
 
-    XceiverClientSpi client = xceiverClientManager.acquireClient(container.getPipeline());
+    ContainerApi containerClient = containerApiManager.acquireClient(container.getPipeline());
 
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.createContainer(container.getContainerInfo().getContainerID());
-      ByteString byteString = UnsafeByteOperations.unsafeWrap(new byte[0]);
-      EchoResponseProto response =
-          containerClient.echo(container.getContainerInfo().getContainerID(), byteString, 1, 0, true);
-      assertEquals(1, response.getPayload().size());
-    }
-    xceiverClientManager.releaseClient(client, false);
+    containerClient.createContainer(container.getContainerInfo().getContainerID());
+    ByteString byteString = UnsafeByteOperations.unsafeWrap(new byte[0]);
+    EchoResponseProto response =
+        containerClient.echo(container.getContainerInfo().getContainerID(), byteString, 1, 0, true);
+    assertEquals(1, response.getPayload().size());
   }
 }
 

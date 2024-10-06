@@ -18,13 +18,14 @@
 
 package org.apache.hadoop.ozone.client;
 
+import jakarta.annotation.Nonnull;
 import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfigValidator;
 import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.client.io.OzoneInputStream;
@@ -35,7 +36,6 @@ import org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes;
 import org.apache.hadoop.ozone.om.helpers.ServiceInfoEx;
 import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
 import org.apache.ozone.test.LambdaTestUtils.VoidCallable;
-import jakarta.annotation.Nonnull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,10 +48,11 @@ import java.util.UUID;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.client.ReplicationFactor.ONE;
 import static org.apache.ozone.test.GenericTestUtils.getTestStartTime;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
 
 /**
  * Real unit test for OzoneClient.
@@ -63,11 +64,10 @@ public class TestOzoneClient {
   private OzoneClient client;
   private ObjectStore store;
 
-  public static <E extends Throwable> void expectOmException(
+  public static void expectOmException(
       OMException.ResultCodes code,
-      VoidCallable eval)
-      throws Exception {
-    OMException ex = assertThrows(OMException.class, () -> eval.call());
+      VoidCallable eval) {
+    OMException ex = assertThrows(OMException.class, eval::call);
     assertEquals(code, ex.getResult());
   }
 
@@ -88,9 +88,9 @@ public class TestOzoneClient {
 
       @Nonnull
       @Override
-      protected XceiverClientFactory createXceiverClientFactory(
+      protected ContainerApiManager createContainerApiManager(
           ServiceInfoEx serviceInfo) {
-        return new MockXceiverClientFactory();
+        return mock(ContainerApiManager.class);
       }
     });
 
@@ -117,7 +117,7 @@ public class TestOzoneClient {
 
   @Test
   public void testCreateVolumeWithMetadata()
-      throws IOException, OzoneClientException {
+      throws IOException {
     String volumeName = UUID.randomUUID().toString();
     VolumeArgs volumeArgs = VolumeArgs.newBuilder()
         .addMetadata("key1", "val1")

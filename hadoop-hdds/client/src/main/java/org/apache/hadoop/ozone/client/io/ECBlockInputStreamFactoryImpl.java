@@ -23,6 +23,7 @@ import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
 import org.apache.hadoop.io.ByteBufferPool;
@@ -68,14 +69,15 @@ public final class ECBlockInputStreamFactoryImpl implements
    *                        know are bad and should not be used.
    * @param repConfig The replication Config
    * @param blockInfo The blockInfo representing the block.
-   * @param xceiverFactory Factory to create the xceiver in the client
+   * @param containerApiManager Factory to create the xceiver in the client
    * @param refreshFunction Function to refresh the pipeline if needed
    * @return BlockExtendedInputStream of the correct type.
    */
+  @Override
   public BlockExtendedInputStream create(boolean missingLocations,
       List<DatanodeDetails> failedLocations, ReplicationConfig repConfig,
       BlockLocationInfo blockInfo,
-      XceiverClientFactory xceiverFactory,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
       OzoneClientConfig config) {
     if (missingLocations) {
@@ -83,7 +85,7 @@ public final class ECBlockInputStreamFactoryImpl implements
       ECBlockReconstructedStripeInputStream sis =
           new ECBlockReconstructedStripeInputStream(
               (ECReplicationConfig)repConfig, blockInfo,
-              xceiverFactory, refreshFunction, inputStreamFactory,
+              containerApiManager, refreshFunction, inputStreamFactory,
               byteBufferPool, ecReconstructExecutorSupplier.get(), config);
       if (failedLocations != null) {
         sis.addFailedDatanodes(failedLocations);
@@ -93,7 +95,7 @@ public final class ECBlockInputStreamFactoryImpl implements
     } else {
       // Otherwise create the more efficient non-reconstruction reader
       return new ECBlockInputStream((ECReplicationConfig)repConfig, blockInfo,
-          xceiverFactory, refreshFunction, inputStreamFactory,
+          containerApiManager, refreshFunction, inputStreamFactory,
           config);
     }
   }

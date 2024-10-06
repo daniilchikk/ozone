@@ -22,12 +22,10 @@ import com.google.common.collect.ImmutableList;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails.Port;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.container.replication.ReplicationManager.ReplicationManagerConfiguration;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
+import org.apache.hadoop.hdds.scm.container.replication.ReplicationManager.ReplicationManagerConfiguration;
 import org.apache.hadoop.hdds.utils.IOUtils;
 import org.apache.hadoop.ozone.HddsDatanodeService;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
@@ -67,7 +65,7 @@ class TestContainerReplication {
 
   private static MiniOzoneCluster cluster;
 
-  private static XceiverClientFactory clientFactory;
+  private static ContainerApiManager clientFactory;
 
   @BeforeAll
   static void setup() throws Exception {
@@ -85,7 +83,7 @@ class TestContainerReplication {
     cluster.startHddsDatanodes();
     cluster.waitForClusterToBeReady();
 
-    clientFactory = new XceiverClientManager(conf);
+    clientFactory = new ContainerApiManagerImpl();
   }
 
   @AfterAll
@@ -210,12 +208,9 @@ class TestContainerReplication {
   private static long createNewClosedContainer(DatanodeDetails dn)
       throws Exception {
     long containerID = CONTAINER_ID.incrementAndGet();
-    try (XceiverClientSpi client = clientFactory.acquireClient(createPipeline(singleton(dn)));
-         ContainerApi containerClient = new ContainerApiImpl(client, null);
-    ) {
-      containerClient.createContainer(containerID, CLOSED, 0);
-      return containerID;
-    }
+    ContainerApi containerClient = clientFactory.acquireClient(createPipeline(singleton(dn)));
+    containerClient.createContainer(containerID, CLOSED, 0);
+    return containerID;
   }
 
 }

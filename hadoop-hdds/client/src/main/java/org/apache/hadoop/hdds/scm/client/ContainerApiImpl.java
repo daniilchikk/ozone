@@ -34,14 +34,20 @@ import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerExcep
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
+import org.apache.ratis.client.api.DataStreamOutput;
+import org.apache.ratis.proto.RaftProtos;
+import org.apache.ratis.protocol.RoutingTable;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.apache.ratis.util.function.CheckedFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
@@ -96,6 +102,11 @@ public class ContainerApiImpl implements ContainerApi {
   }
 
   @Override
+  public PutBlockResponseProto putBlock() {
+    return PutBlockResponseProto.newBuilder().build();
+  }
+
+  @Override
   public XceiverClientReply putBlockAsync(BlockData containerBlockData, boolean eof)
       throws IOException, ExecutionException, InterruptedException {
     ContainerCommandRequestProto request = requestHelper.createPutBlockRequest(containerBlockData, eof);
@@ -128,6 +139,11 @@ public class ContainerApiImpl implements ContainerApi {
   }
 
   @Override
+  public WriteChunkRequestProto writeChunk() {
+    return WriteChunkRequestProto.newBuilder().build();
+  }
+
+  @Override
   public XceiverClientReply writeChunkAsync(ChunkInfo chunk, BlockID blockId, ByteString data, int replicationIndex,
       BlockData blockData, boolean close) throws IOException, ExecutionException, InterruptedException {
     ContainerCommandRequestProto request =
@@ -145,6 +161,11 @@ public class ContainerApiImpl implements ContainerApi {
   }
 
   @Override
+  public XceiverClientReply createContainerAsync() {
+    return null;
+  }
+
+  @Override
   public void deleteContainer(long containerId, boolean force) throws IOException {
     ContainerCommandRequestProto request = requestHelper.createDeleteContainerRequest(containerId, force);
 
@@ -156,6 +177,11 @@ public class ContainerApiImpl implements ContainerApi {
     ContainerCommandRequestProto request = requestHelper.createCloseContainerRequest(containerId);
 
     client.sendCommand(request, validators);
+  }
+
+  @Override
+  public XceiverClientReply closeContainerAsync() throws IOException {
+    return null;
   }
 
   @Override
@@ -173,6 +199,31 @@ public class ContainerApiImpl implements ContainerApi {
         payloadRespSizeKB, sleepTimeMs, readOnly);
 
     return client.sendCommand(request, validators).getEcho();
+  }
+
+  @Override
+  public CompletableFuture<XceiverClientReply> watchForCommit(long commitIndex) {
+    return CompletableFuture.completedFuture(null);
+  }
+
+  @Override
+  public long getReplicatedMinCommitIndex() {
+    return 0;
+  }
+
+  @Override
+  public void updateCommitInfosMap(Collection<RaftProtos.CommitInfoProto> commitInfos) {
+
+  }
+
+  @Override
+  public DataStreamOutput stream(ByteBuffer readOnlyByteBuffer) {
+    return null;
+  }
+
+  @Override
+  public DataStreamOutput stream(ByteBuffer readOnlyByteBuffer, RoutingTable routingTable) {
+    return null;
   }
 
   private GetBlockResponseProto getBlock(BlockID blockId, DatanodeDetails datanode,

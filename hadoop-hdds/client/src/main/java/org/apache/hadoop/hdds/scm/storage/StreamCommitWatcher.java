@@ -18,7 +18,7 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 
 import java.util.List;
 
@@ -29,9 +29,8 @@ import java.util.List;
 class StreamCommitWatcher extends AbstractCommitWatcher<StreamBuffer> {
   private final List<StreamBuffer> bufferList;
 
-  StreamCommitWatcher(XceiverClientSpi xceiverClient,
-      List<StreamBuffer> bufferList) {
-    super(xceiverClient);
+  StreamCommitWatcher(ContainerApi containerClient, List<StreamBuffer> bufferList) {
+    super(containerClient);
     this.bufferList = bufferList;
   }
 

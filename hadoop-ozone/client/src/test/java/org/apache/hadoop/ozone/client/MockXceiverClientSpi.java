@@ -34,7 +34,6 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkR
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkResponseProto;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerNotOpenException;
@@ -161,9 +160,8 @@ public class MockXceiverClientSpi extends XceiverClientSpi {
         .setCmdType(request.getCmdType());
     builder = function.apply(builder);
 
-    XceiverClientReply reply = new XceiverClientReply(
+    return new XceiverClientReply(
         CompletableFuture.completedFuture(builder.build()));
-    return reply;
   }
 
   private WriteChunkResponseProto writeChunk(
@@ -180,11 +178,6 @@ public class MockXceiverClientSpi extends XceiverClientSpi {
       builder.setCommittedBlockLength(doPutBlock(blockData));
     }
     return builder.build();
-  }
-
-  @Override
-  public ReplicationType getPipelineType() {
-    return pipeline.getType();
   }
 
   @Override

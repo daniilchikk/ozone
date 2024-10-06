@@ -17,21 +17,8 @@
  */
 package org.apache.hadoop.ozone.client.io;
 
-import java.io.IOException;
-import java.io.InterruptedIOException;
-import java.io.OutputStream;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
-
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import org.apache.hadoop.fs.FSExceptionMessages;
 import org.apache.hadoop.fs.Syncable;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
@@ -40,8 +27,8 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ExcludeList;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
@@ -56,14 +43,25 @@ import org.apache.hadoop.ozone.om.helpers.OmMultipartCommitUploadPartInfo;
 import org.apache.hadoop.ozone.om.helpers.OpenKeySession;
 import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
 import org.apache.hadoop.ozone.util.MetricUtil;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import org.apache.ratis.protocol.exceptions.AlreadyClosedException;
 import org.apache.ratis.protocol.exceptions.RaftRetryFailureException;
 import org.apache.ratis.util.function.CheckedRunnable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.io.OutputStream;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Maintaining a list of BlockInputStream. Write based on offset.
@@ -577,7 +575,7 @@ public class KeyOutputStream extends OutputStream
    */
   @SuppressWarnings("squid:S1141")
   private void handleFlushOrClose(StreamAction op) throws IOException {
-    if (!blockOutputStreamEntryPool.isEmpty()) {
+    if (blockOutputStreamEntryPool.isNonEmpty()) {
       while (true) {
         try {
           BlockOutputStreamEntry entry =
@@ -693,9 +691,8 @@ public class KeyOutputStream extends OutputStream
    */
   public static class Builder {
     private OpenKeySession openHandler;
-    private XceiverClientFactory xceiverManager;
+    private ContainerApiManager containerApiManager;
     private OzoneManagerProtocol omClient;
-    private final String requestID = UUID.randomUUID().toString();
     private String multipartUploadID;
     private int multipartNumber;
     private boolean isMultipartKey;
@@ -735,12 +732,12 @@ public class KeyOutputStream extends OutputStream
       return this;
     }
 
-    public XceiverClientFactory getXceiverManager() {
-      return xceiverManager;
+    public ContainerApiManager getContainerApiManager() {
+      return containerApiManager;
     }
 
-    public Builder setXceiverClientManager(XceiverClientFactory manager) {
-      this.xceiverManager = manager;
+    public Builder setContainerApiManager(ContainerApiManager containerApiManager) {
+      this.containerApiManager = containerApiManager;
       return this;
     }
 
@@ -751,10 +748,6 @@ public class KeyOutputStream extends OutputStream
     public Builder setOmClient(OzoneManagerProtocol client) {
       this.omClient = client;
       return this;
-    }
-
-    public String getRequestID() {
-      return requestID;
     }
 
     public boolean isMultipartKey() {
@@ -832,10 +825,6 @@ public class KeyOutputStream extends OutputStream
     public Builder setOmVersion(OzoneManagerVersion omVersion) {
       this.ozoneManagerVersion = omVersion;
       return this;
-    }
-
-    public OzoneManagerVersion getOmVersion() {
-      return ozoneManagerVersion;
     }
 
     public KeyOutputStream build() {

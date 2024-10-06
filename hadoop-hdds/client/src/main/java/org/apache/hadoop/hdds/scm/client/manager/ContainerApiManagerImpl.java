@@ -22,19 +22,19 @@ import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.ContainerMultinodeApi;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 
-public interface ContainerApiManager extends AutoCloseable {
-  default ContainerApi acquireClient(Pipeline pipeline) {
-    return acquireClient(pipeline, false);
+public class ContainerApiManagerImpl implements ContainerApiManager {
+  @Override
+  public ContainerApi acquireClient(Pipeline pipeline, boolean topologyAware) {
+    return null;
   }
-
-  ContainerApi acquireClient(Pipeline pipeline, boolean topologyAware);
-
-  default ContainerMultinodeApi acquireMultinodeClient(Pipeline pipeline) {
-    return acquireMultinodeClient(pipeline, false);
-  }
-
-  ContainerMultinodeApi acquireMultinodeClient(Pipeline pipeline, boolean topologyAware);
 
   @Override
-  void close();
+  public ContainerMultinodeApi acquireMultinodeClient(Pipeline pipeline, boolean topologyAware) {
+    return null;
+  }
+
+  @Override
+  public void close() {
+
+  }
 }

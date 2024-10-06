@@ -185,7 +185,7 @@ public class TestBlockDataStreamOutput {
     KeyDataStreamOutput keyDataStreamOutput =
         (KeyDataStreamOutput) key.getByteBufStreamOutput();
     ByteBufferStreamOutput stream =
-        keyDataStreamOutput.getStreamEntries().get(0).getByteBufStreamOutput();
+        keyDataStreamOutput.getStreamEntries().get(0).getByteBufferStreamOutput();
     assertInstanceOf(BlockDataStreamOutput.class, stream);
     TestHelper.waitForContainerClose(key, cluster);
     key.write(b);

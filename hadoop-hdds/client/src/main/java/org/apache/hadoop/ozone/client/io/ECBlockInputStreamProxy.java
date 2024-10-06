@@ -23,6 +23,7 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
@@ -50,7 +51,7 @@ public class ECBlockInputStreamProxy extends BlockExtendedInputStream {
       LoggerFactory.getLogger(ECBlockInputStreamProxy.class);
 
   private final ECReplicationConfig repConfig;
-  private final XceiverClientFactory xceiverClientFactory;
+  private final ContainerApiManager containerApiManager;
   private final Function<BlockID, BlockLocationInfo> refreshFunction;
   private final BlockLocationInfo blockInfo;
   private final ECBlockInputStreamFactory ecBlockInputStreamFactory;
@@ -59,7 +60,7 @@ public class ECBlockInputStreamProxy extends BlockExtendedInputStream {
   private boolean reconstructionReader = false;
   private List<DatanodeDetails> failedLocations = new ArrayList<>();
   private boolean closed = false;
-  private OzoneClientConfig config;
+  private final OzoneClientConfig config;
 
   /**
    * Given the ECReplicationConfig and the block length, calculate how many
@@ -98,15 +99,15 @@ public class ECBlockInputStreamProxy extends BlockExtendedInputStream {
   }
 
   public ECBlockInputStreamProxy(ECReplicationConfig repConfig,
-      BlockLocationInfo blockInfo,
-      XceiverClientFactory xceiverClientFactory, Function<BlockID,
-      BlockLocationInfo> refreshFunction,
-      ECBlockInputStreamFactory streamFactory,
-      OzoneClientConfig config) {
+                                 BlockLocationInfo blockInfo,
+                                 ContainerApiManager containerApiManager,
+                                 Function<BlockID, BlockLocationInfo> refreshFunction,
+                                 ECBlockInputStreamFactory streamFactory,
+                                 OzoneClientConfig config) {
     this.repConfig = repConfig;
     this.blockInfo = blockInfo;
     this.ecBlockInputStreamFactory = streamFactory;
-    this.xceiverClientFactory = xceiverClientFactory;
+    this.containerApiManager = containerApiManager;
     this.refreshFunction = refreshFunction;
     this.config = config;
 
@@ -127,7 +128,7 @@ public class ECBlockInputStreamProxy extends BlockExtendedInputStream {
     }
     blockReader = ecBlockInputStreamFactory.create(reconstructionReader,
         failedLocations, repConfig, blockInfo,
-        xceiverClientFactory, refreshFunction, config);
+        containerApiManager, refreshFunction, config);
   }
 
   @Override

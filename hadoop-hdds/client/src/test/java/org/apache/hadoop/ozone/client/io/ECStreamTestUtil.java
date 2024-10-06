@@ -23,7 +23,7 @@ import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
@@ -68,14 +68,13 @@ public final class ECStreamTestUtil {
         .setReplicationConfig(repConf)
         .build();
 
-    BlockLocationInfo keyInfo = new BlockLocationInfo.Builder()
+    return new BlockLocationInfo.Builder()
         .setBlockID(new BlockID(1, 1))
         .setLength(blockLength)
         .setOffset(0)
         .setPipeline(pipeline)
         .setPartNumber(0)
         .build();
-    return keyInfo;
   }
 
   public static BlockLocationInfo createKeyInfo(ReplicationConfig repConf,
@@ -221,7 +220,7 @@ public final class ECStreamTestUtil {
   public static class TestBlockInputStreamFactory implements
       BlockInputStreamFactory {
 
-    private Map<Integer, TestBlockInputStream> blockStreams =
+    private final Map<Integer, TestBlockInputStream> blockStreams =
         new LinkedHashMap<>();
     private List<ByteBuffer> blockStreamData;
     // List of EC indexes that should fail immediately on read
@@ -256,11 +255,12 @@ public final class ECStreamTestUtil {
       failIndexes.addAll(Arrays.asList(fail));
     }
 
+    @Override
     public synchronized BlockExtendedInputStream create(
         ReplicationConfig repConfig,
         BlockLocationInfo blockInfo, Pipeline pipeline,
         Token<OzoneBlockTokenIdentifier> token,
-        XceiverClientFactory xceiverFactory,
+        ContainerApiManager containerApiManager,
         Function<BlockID, BlockLocationInfo> refreshFunction,
         OzoneClientConfig config) {
 
@@ -282,14 +282,14 @@ public final class ECStreamTestUtil {
    */
   public static class TestBlockInputStream extends BlockExtendedInputStream {
 
-    private ByteBuffer data;
-    private BlockID blockID;
-    private long length;
+    private final ByteBuffer data;
+    private final BlockID blockID;
+    private final long length;
     private boolean shouldError = false;
     private int shouldErrorPosition = 0;
     private boolean shouldErrorOnSeek = false;
     private IOException errorToThrow = null;
-    private int ecReplicaIndex = 0;
+    private final int ecReplicaIndex;
     private static final byte EOF = -1;
 
     TestBlockInputStream(BlockID blockId, long blockLen, ByteBuffer data) {
@@ -357,7 +357,7 @@ public final class ECStreamTestUtil {
         buf.put(data.get());
       }
       return toRead;
-    };
+    }
 
     private void throwError() throws IOException {
       if (errorToThrow != null) {

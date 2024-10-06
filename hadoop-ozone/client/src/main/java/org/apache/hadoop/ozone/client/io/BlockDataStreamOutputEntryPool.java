@@ -21,7 +21,7 @@ package org.apache.hadoop.ozone.client.io;
 import com.google.common.base.Preconditions;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ExcludeList;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.StreamBuffer;
@@ -56,25 +56,22 @@ public class BlockDataStreamOutputEntryPool implements KeyMetadataAware {
   private int currentStreamIndex;
   private final OzoneManagerProtocol omClient;
   private final OmKeyArgs keyArgs;
-  private final XceiverClientFactory xceiverClientFactory;
-  private final String requestID;
+  private final ContainerApiManager containerApiManager;
   private OmMultipartCommitUploadPartInfo commitUploadPartInfo;
   private final long openID;
   private final ExcludeList excludeList;
   private List<StreamBuffer> bufferList;
 
-  @SuppressWarnings({"parameternumber", "squid:S00107"})
   public BlockDataStreamOutputEntryPool(
       OzoneClientConfig config,
       OzoneManagerProtocol omClient,
-      String requestId, ReplicationConfig replicationConfig,
+      ReplicationConfig replicationConfig,
       String uploadID, int partNumber,
       boolean isMultipart, OmKeyInfo info,
-      boolean unsafeByteBufferConversion,
-      XceiverClientFactory xceiverClientFactory, long openID
+      ContainerApiManager containerApiManager, long openID
   ) {
     this.config = config;
-    this.xceiverClientFactory = xceiverClientFactory;
+    this.containerApiManager = containerApiManager;
     streamEntries = new ArrayList<>();
     currentStreamIndex = 0;
     this.omClient = omClient;
@@ -84,7 +81,6 @@ public class BlockDataStreamOutputEntryPool implements KeyMetadataAware {
         .setIsMultipartKey(isMultipart).setMultipartUploadID(uploadID)
         .setMultipartUploadPartNumber(partNumber)
         .setSortDatanodesInPipeline(true).build();
-    this.requestID = requestId;
     this.openID = openID;
     this.excludeList = createExcludeList();
     this.bufferList = new ArrayList<>();
@@ -101,10 +97,9 @@ public class BlockDataStreamOutputEntryPool implements KeyMetadataAware {
    *
    * @param version the set of blocks that are pre-allocated.
    * @param openVersion the version corresponding to the pre-allocation.
-   * @throws IOException
    */
   public void addPreallocateBlocks(OmKeyLocationInfoGroup version,
-      long openVersion) throws IOException {
+      long openVersion) {
     // server may return any number of blocks, (0 to any)
     // only the blocks allocated in this open session (block createVersion
     // equals to open session version)
@@ -119,7 +114,7 @@ public class BlockDataStreamOutputEntryPool implements KeyMetadataAware {
         new BlockDataStreamOutputEntry.Builder()
             .setBlockID(subKeyInfo.getBlockID())
             .setKey(keyArgs.getKeyName())
-            .setXceiverClientManager(xceiverClientFactory)
+            .setContainerApiManager(containerApiManager)
             .setPipeline(subKeyInfo.getPipeline())
             .setConfig(config)
             .setLength(subKeyInfo.getLength())
@@ -183,8 +178,8 @@ public class BlockDataStreamOutputEntryPool implements KeyMetadataAware {
     return streamEntries;
   }
 
-  XceiverClientFactory getXceiverClientFactory() {
-    return xceiverClientFactory;
+  ContainerApiManager getContainerApiManager() {
+    return containerApiManager;
   }
 
   String getKeyName() {

@@ -20,13 +20,15 @@ package org.apache.hadoop.ozone.client.rpc;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationFactor;
 import org.apache.hadoop.hdds.client.ReplicationType;
+import org.apache.hadoop.hdds.conf.DatanodeRatisServerConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.replication.ReplicationManager.ReplicationManagerConfiguration;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
@@ -39,9 +41,7 @@ import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.client.OzoneClientFactory;
 import org.apache.hadoop.ozone.client.io.KeyOutputStream;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
-import org.apache.hadoop.hdds.conf.DatanodeRatisServerConfig;
 import org.apache.hadoop.ozone.container.TestHelper;
-
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.ozone.test.GenericTestUtils;
 import org.junit.jupiter.api.AfterAll;
@@ -60,9 +60,9 @@ import java.util.function.Predicate;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_CONTAINER_REPORT_INTERVAL;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_HEARTBEAT_INTERVAL;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_DATANODE_PIPELINE_LIMIT;
 import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_PIPELINE_DESTROY_TIMEOUT;
 import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_STALENODE_INTERVAL;
-import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_DATANODE_PIPELINE_LIMIT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -75,13 +75,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 public class TestContainerReplicationEndToEnd {
 
   private static MiniOzoneCluster cluster;
-  private static OzoneConfiguration conf;
   private static OzoneClient client;
   private static ObjectStore objectStore;
   private static String volumeName;
   private static String bucketName;
-  private static String path;
-  private static XceiverClientManager xceiverClientManager;
+  private static ContainerApiManager containerApiManager;
   private static long containerReportInterval;
 
   /**
@@ -91,8 +89,8 @@ public class TestContainerReplicationEndToEnd {
    */
   @BeforeAll
   public static void init() throws Exception {
-    conf = new OzoneConfiguration();
-    path = GenericTestUtils
+    OzoneConfiguration conf = new OzoneConfiguration();
+    String path = GenericTestUtils
         .getTempPath(TestContainerStateMachineFailures.class.getSimpleName());
     File baseDir = new File(path);
     baseDir.mkdirs();
@@ -128,7 +126,7 @@ public class TestContainerReplicationEndToEnd {
     //the easiest way to create an open container is creating a key
     client = OzoneClientFactory.getRpcClient(conf);
     objectStore = client.getObjectStore();
-    xceiverClientManager = new XceiverClientManager(conf);
+    containerApiManager = new ContainerApiManagerImpl();
     volumeName = "testcontainerstatemachinefailures";
     bucketName = volumeName;
     objectStore.createVolume(volumeName);
@@ -141,8 +139,8 @@ public class TestContainerReplicationEndToEnd {
   @AfterAll
   public static void shutdown() {
     IOUtils.closeQuietly(client);
-    if (xceiverClientManager != null) {
-      xceiverClientManager.close();
+    if (containerApiManager != null) {
+      containerApiManager.close();
     }
     if (cluster != null) {
       cluster.shutdown();
@@ -201,13 +199,9 @@ public class TestContainerReplicationEndToEnd {
     request.setContainerID(containerID);
     request.setCloseContainer(
         ContainerProtos.CloseContainerRequestProto.getDefaultInstance());
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
-    try {
-      xceiverClient.sendCommand(request.build());
-    } finally {
-      xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+    containerClient.closeContainer(containerID);
+
     // wait for container to move to closed state in SCM
     Thread.sleep(2 * containerReportInterval);
     assertSame(
@@ -221,7 +215,7 @@ public class TestContainerReplicationEndToEnd {
     for (HddsDatanodeService dn : cluster.getHddsDatanodes()) {
       Predicate<DatanodeDetails> p =
           i -> i.getUuid().equals(dn.getDatanodeDetails().getUuid());
-      if (!pipeline.getNodes().stream().anyMatch(p)) {
+      if (pipeline.getNodes().stream().noneMatch(p)) {
         dnService = dn;
       }
     }
@@ -229,10 +223,8 @@ public class TestContainerReplicationEndToEnd {
     assertNotNull(dnService);
     final HddsDatanodeService newReplicaNode = dnService;
     // wait for the container to get replicated
-    GenericTestUtils.waitFor(() -> {
-      return newReplicaNode.getDatanodeStateMachine().getContainer()
-          .getContainerSet().getContainer(containerID) != null;
-    }, 500, 100000);
+    GenericTestUtils.waitFor(() -> newReplicaNode.getDatanodeStateMachine().getContainer()
+        .getContainerSet().getContainer(containerID) != null, 500, 100000);
     assertThat(newReplicaNode.getDatanodeStateMachine().getContainer()
         .getContainerSet().getContainer(containerID).getContainerData()
         .getBlockCommitSequenceId())
@@ -246,7 +238,6 @@ public class TestContainerReplicationEndToEnd {
     }
     // This will try to read the data from the dn to which the container got
     // replicated after the container got closed.
-    TestHelper
-        .validateData(keyName, testData, objectStore, volumeName, bucketName);
+    TestHelper.validateData(keyName, testData, objectStore, volumeName, bucketName);
   }
 }

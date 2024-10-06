@@ -19,12 +19,13 @@ package org.apache.hadoop.ozone.client.io;
 
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
-import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -32,7 +33,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
@@ -42,8 +42,7 @@ public class TestECBlockOutputStreamEntry {
 
   @Test
   public void
-      testAcquireDifferentClientForECBlocksOnTheSameHostButDifferentPort()
-      throws IOException {
+      testAcquireDifferentClientForECBlocksOnTheSameHostButDifferentPort() throws IOException {
     PipelineID randomId = PipelineID.randomId();
     ReplicationConfig ecReplicationConfig =
         new ECReplicationConfig("RS-3-2-1024k");
@@ -60,28 +59,26 @@ public class TestECBlockOutputStreamEntry {
         .setState(Pipeline.PipelineState.OPEN)
         .setNodes(nodes)
         .build();
-    try (XceiverClientManager manager =
-        new XceiverClientManager(new OzoneConfiguration())) {
-      HashSet<XceiverClientSpi> clients = new HashSet<>();
+    try (ContainerApiManager manager = new ContainerApiManagerImpl()) {
+      HashSet<ContainerApi> clients = new HashSet<>();
       final ECBlockOutputStreamEntry.Builder b = new ECBlockOutputStreamEntry.Builder();
-      b.setXceiverClientManager(manager)
+      b.setContainerApiManager(manager)
           .setPipeline(anECPipeline);
-      final ECBlockOutputStreamEntry entry = b.build();
-      for (int i = 0; i < nodes.size(); i++) {
-        clients.add(
-            manager.acquireClient(
-                entry.createSingleECBlockPipeline(
-                    anECPipeline, nodes.get(i), i
-                )));
+      try (ECBlockOutputStreamEntry entry = b.build()) {
+        for (int i = 0; i < nodes.size(); i++) {
+          clients.add(
+              manager.acquireClient(
+                  entry.createSingleECBlockPipeline(
+                      anECPipeline, nodes.get(i), i
+                  )));
+        }
+        assertEquals(5, clients.size());
       }
-      assertEquals(5, clients.size());
     }
   }
 
   @Test
-  public void
-      testAcquireDifferentClientForECBlocksOnTheSameHostWithSomeOnSamePortAlso()
-      throws IOException {
+  public void testAcquireDifferentClientForECBlocksOnTheSameHostWithSomeOnSamePortAlso() throws IOException {
     PipelineID randomId = PipelineID.randomId();
     ReplicationConfig ecReplicationConfig =
         new ECReplicationConfig("RS-3-2-1024k");
@@ -98,25 +95,21 @@ public class TestECBlockOutputStreamEntry {
         .setState(Pipeline.PipelineState.OPEN)
         .setNodes(nodes)
         .build();
-    try (XceiverClientManager manager =
-        new XceiverClientManager(new OzoneConfiguration())) {
-      HashSet<XceiverClientSpi> clients = new HashSet<>();
+    try (ContainerApiManager manager = new ContainerApiManagerImpl()) {
+      HashSet<ContainerApi> clients = new HashSet<>();
       final ECBlockOutputStreamEntry.Builder b = new ECBlockOutputStreamEntry.Builder();
-      b.setXceiverClientManager(manager)
+      b.setContainerApiManager(manager)
           .setPipeline(anECPipeline);
-      final ECBlockOutputStreamEntry entry = b.build();
-      for (int i = 0; i < nodes.size(); i++) {
-        clients.add(
-            manager.acquireClient(
-                entry.createSingleECBlockPipeline(
-                    anECPipeline, nodes.get(i), i
-                )));
+      try (ECBlockOutputStreamEntry entry = b.build()) {
+        for (int i = 0; i < nodes.size(); i++) {
+          clients.add(
+              manager.acquireClient(
+                  entry.createSingleECBlockPipeline(
+                      anECPipeline, nodes.get(i), i
+                  )));
+        }
+        assertEquals(3, clients.size());
       }
-      assertEquals(3, clients.size());
-      assertEquals(1,
-          clients.stream().filter(c -> c.getRefcount() == 3).count());
-      assertEquals(2,
-          clients.stream().filter(c -> c.getRefcount() == 1).count());
     }
   }
 

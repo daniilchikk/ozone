@@ -24,15 +24,12 @@ import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
-import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CACertificateProvider;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.om.protocolPB.OzoneManagerProtocolClientSideTranslatorPB;
@@ -72,7 +69,7 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
   private OzoneConfiguration configuration;
   private ByteString payloadReqBytes;
   private int payloadRespSize;
-  private List<XceiverClientSpi> clients;
+  private List<ContainerApi> clients;
   private @Nullable Token<? extends TokenIdentifier> containerToken;
   @Option(names = {"--payload-req"},
           description =
@@ -152,23 +149,19 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
           .build();
     }
     containerToken = scmClient.getContainerToken(containerID);
-    XceiverClientFactory xceiverClientManager;
+    ContainerApiManager containerApiManager;
     OzoneManagerProtocolClientSideTranslatorPB omClient;
     if (OzoneSecurityUtil.isSecurityEnabled(configuration)) {
       omClient = createOmClient(configuration, null);
       CACertificateProvider caCerts = () -> omClient.getServiceInfo().provideCACerts();
-      xceiverClientManager = new XceiverClientManager(
-          configuration,
-          configuration.getObject(XceiverClientManager.ScmClientConfig.class),
-          new ClientTrustManager(caCerts, null)
-      );
+      containerApiManager = new ContainerApiManagerImpl();
     } else {
       omClient = null;
-      xceiverClientManager = new XceiverClientManager(configuration);
+      containerApiManager = new ContainerApiManagerImpl();
     }
     clients = new ArrayList<>(numClients);
     for (int i = 0; i < numClients; i++) {
-      clients.add(xceiverClientManager.acquireClient(pipeline));
+      clients.add(containerApiManager.acquireClient(pipeline));
     }
 
     init();
@@ -181,10 +174,7 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
       if (omClient != null) {
         omClient.close();
       }
-      for (XceiverClientSpi client : clients) {
-        xceiverClientManager.releaseClient(client, false);
-      }
-      xceiverClientManager.close();
+      containerApiManager.close();
       scmClient.close();
     }
     return null;
@@ -207,10 +197,8 @@ public class DNRPCLoadGenerator extends BaseFreonGenerator
   private void sendRPCReq(long l) throws Exception {
     timer.time(() -> {
       int clientIndex = (numClients == 1) ? 0 : (int)l % numClients;
-      try (ContainerApi containerClient = new ContainerApiImpl(clients.get(clientIndex), containerToken)) {
-        containerClient.echo(containerID, payloadReqBytes, payloadRespSize, sleepTimeMs, readOnly);
-        return null;
-      }
+      clients.get(clientIndex).echo(containerID, payloadReqBytes, payloadRespSize, sleepTimeMs, readOnly);
+      return null;
     });
   }
 }

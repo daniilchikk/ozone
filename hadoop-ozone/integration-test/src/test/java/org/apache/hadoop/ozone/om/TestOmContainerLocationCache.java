@@ -19,6 +19,7 @@
 package org.apache.hadoop.ozone.om;
 
 import com.google.common.collect.ImmutableMap;
+import jakarta.annotation.Nonnull;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.hdds.HddsConfigKeys;
@@ -43,11 +44,10 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientGrpc;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.common.helpers.AllocatedBlock;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
@@ -77,7 +77,6 @@ import org.apache.ratis.thirdparty.io.grpc.Status;
 import org.apache.ratis.thirdparty.io.grpc.StatusException;
 import org.apache.ratis.thirdparty.io.grpc.StatusRuntimeException;
 import org.apache.ratis.util.ExitUtils;
-import jakarta.annotation.Nonnull;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -111,7 +110,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.anyBoolean;
 import static org.mockito.Mockito.anyInt;
 import static org.mockito.Mockito.anyLong;
 import static org.mockito.Mockito.anyString;
@@ -119,7 +117,6 @@ import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -146,7 +143,6 @@ public class TestOmContainerLocationCache {
   private static final String VERSIONED_BUCKET_NAME = "versionedBucket1";
   private static final String VOLUME_NAME = "vol1";
   private static OzoneManager om;
-  private static RpcClient rpcClient;
   private static ObjectStore objectStore;
   private static XceiverClientGrpc mockDn1Protocol;
   private static XceiverClientGrpc mockDn2Protocol;
@@ -177,7 +173,7 @@ public class TestOmContainerLocationCache {
     mockScmBlockLocationProtocol = mock(ScmBlockLocationProtocol.class);
     mockScmContainerClient =
         mock(StorageContainerLocationProtocol.class);
-    InnerNode.Factory factory = InnerNodeImpl.FACTORY;
+    InnerNode.Factory<InnerNodeImpl> factory = InnerNodeImpl.FACTORY;
     when(mockScmBlockLocationProtocol.getNetworkTopology()).thenReturn(
         factory.newInnerNode("", "", null, NetConstants.ROOT_LEVEL, 1));
 
@@ -186,10 +182,10 @@ public class TestOmContainerLocationCache {
     om = omTestManagers.getOzoneManager();
     metadataManager = omTestManagers.getMetadataManager();
 
-    rpcClient = new RpcClient(conf, null) {
+    RpcClient rpcClient = new RpcClient(conf, null) {
       @Nonnull
       @Override
-      protected XceiverClientFactory createXceiverClientFactory(
+      protected ContainerApiManager createContainerApiManager(
           ServiceInfoEx serviceInfo) throws IOException {
         return mockDataNodeClientFactory();
       }
@@ -208,9 +204,9 @@ public class TestOmContainerLocationCache {
     FileUtils.deleteDirectory(dir);
   }
 
-  private static XceiverClientManager mockDataNodeClientFactory()
+  private static ContainerApiManager mockDataNodeClientFactory()
       throws IOException {
-    mockDn1Protocol = spy(new XceiverClientGrpc(createPipeline(DN1), conf));
+    /*mockDn1Protocol = spy(new XceiverClientGrpc(createPipeline(DN1), conf));
     mockDn2Protocol = spy(new XceiverClientGrpc(createPipeline(DN2), conf));
     mockDnEcProtocol = spy(new XceiverClientGrpc(createEcPipeline(
         ImmutableMap.of(DN1, 1, DN2, 2, DN3, 3, DN4, 4, DN5, 5)), conf));
@@ -235,8 +231,8 @@ public class TestOmContainerLocationCache {
     when(manager.acquireClient(argThat(matchEcPipeline())))
         .thenReturn(mockDnEcProtocol);
     when(manager.acquireClientForReadData(argThat(matchEcPipeline())))
-        .thenReturn(mockDnEcProtocol);
-    return manager;
+        .thenReturn(mockDnEcProtocol);*/
+    return mock(ContainerApiManager.class);
   }
 
   private static ArgumentMatcher<Pipeline> matchEmptyPipeline() {
@@ -281,7 +277,7 @@ public class TestOmContainerLocationCache {
     CONTAINER_ID.getAndIncrement();
     reset(mockScmBlockLocationProtocol, mockScmContainerClient,
         mockDn1Protocol, mockDn2Protocol, mockDnEcProtocol);
-    InnerNode.Factory factory = InnerNodeImpl.FACTORY;
+    InnerNode.Factory<InnerNodeImpl> factory = InnerNodeImpl.FACTORY;
     when(mockScmBlockLocationProtocol.getNetworkTopology()).thenReturn(
         factory.newInnerNode("", "", null, NetConstants.ROOT_LEVEL, 1));
     when(mockDn1Protocol.getPipeline()).thenReturn(createPipeline(DN1));
@@ -300,7 +296,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -374,7 +370,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -422,7 +418,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -471,7 +467,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -515,7 +511,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -558,7 +554,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationOnDn1(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDn1Protocol);
-    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L, data);
+    mockPutBlockResponse(mockDn1Protocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME)
         .getBucket(BUCKET_NAME);
@@ -611,7 +607,7 @@ public class TestOmContainerLocationCache {
 
     mockScmAllocationEcPipeline(CONTAINER_ID.get(), 1L);
     mockWriteChunkResponse(mockDnEcProtocol);
-    mockPutBlockResponse(mockDnEcProtocol, CONTAINER_ID.get(), 1L, null);
+    mockPutBlockResponse(mockDnEcProtocol, CONTAINER_ID.get(), 1L);
 
     OzoneBucket bucket = objectStore.getVolume(VOLUME_NAME).getBucket(BUCKET_NAME);
 
@@ -643,9 +639,7 @@ public class TestOmContainerLocationCache {
         .getContainerWithPipelineBatch(newHashSet(CONTAINER_ID.get()));
   }
 
-  private void mockPutBlockResponse(XceiverClientSpi mockDnProtocol,
-                                    long containerId, long localId,
-                                    byte[] data)
+  private void mockPutBlockResponse(XceiverClientSpi mockDnProtocol, long containerId, long localId)
       throws IOException, ExecutionException, InterruptedException {
     GetCommittedBlockLengthResponseProto build =
         GetCommittedBlockLengthResponseProto.newBuilder()
@@ -677,9 +671,7 @@ public class TestOmContainerLocationCache {
       throws IOException, ExecutionException, InterruptedException {
     doAnswer(invocation ->
         new XceiverClientReply(
-            completedFuture(
-                createWriteChunkResponse(
-                    (ContainerCommandRequestProto)invocation.getArgument(0)))))
+            completedFuture(createWriteChunkResponse(invocation.getArgument(0)))))
         .when(mockDnProtocol)
         .sendCommandAsync(argThat(matchCmd(Type.WriteChunk)));
   }

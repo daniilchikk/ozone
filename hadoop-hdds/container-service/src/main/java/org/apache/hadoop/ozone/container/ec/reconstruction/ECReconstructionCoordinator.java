@@ -212,7 +212,7 @@ public class ECReconstructionCoordinator implements Closeable {
         StreamBufferArgs.getDefaultStreamBufferArgs(repConfig, ozoneClientConfig);
     return new ECBlockOutputStream(
         blockLocationInfo.getBlockID(),
-        containerOperationClient.getXceiverClientManager(),
+        containerOperationClient.getContainerApiManager(),
         containerOperationClient.singleNodePipeline(datanodeDetails,
             repConfig, replicaIndex),
         BufferPool.empty(), ozoneClientConfig,
@@ -247,7 +247,7 @@ public class ECReconstructionCoordinator implements Closeable {
     try (ECBlockReconstructedStripeInputStream sis
         = new ECBlockReconstructedStripeInputStream(
         repConfig, blockLocationInfo,
-        this.containerOperationClient.getXceiverClientManager(), null,
+        this.containerOperationClient.getContainerApiManager(), null,
         this.blockInputStreamFactory, byteBufferPool,
         this.ecReconstructReadExecutor,
         clientConfig)) {

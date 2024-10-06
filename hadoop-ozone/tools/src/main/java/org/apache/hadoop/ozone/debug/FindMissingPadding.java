@@ -22,19 +22,16 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ScmOption;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.ScmClient;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.ContainerReplicaInfo;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdds.utils.HAUtils;
 import org.apache.hadoop.ozone.client.ObjectStore;
@@ -196,7 +193,7 @@ public class FindMissingPadding extends Handler implements SubcommandWithParent 
     final boolean tokenEnabled = securityConfig.isSecurityEnabled() && securityConfig.isContainerTokenEnabled();
     StorageContainerLocationProtocol scmContainerClient = HAUtils.getScmContainerClient(getConf());
     RpcClient rpcClient = (RpcClient) ozoneClient.getProxy();
-    XceiverClientFactory xceiverClientManager = rpcClient.getXceiverClientManager();
+    ContainerApiManager containerApiManager = rpcClient.getContainerApiManager();
     Pipeline.Builder pipelineBuilder = Pipeline.newBuilder()
         .setId(PipelineID.randomId())
         .setState(Pipeline.PipelineState.OPEN)
@@ -239,24 +236,21 @@ public class FindMissingPadding extends Handler implements SubcommandWithParent 
           Pipeline pipeline = pipelineBuilder
               .setNodes(Collections.singletonList(replica.getDatanodeDetails()))
               .build();
-          XceiverClientSpi datanodeClient = xceiverClientManager.acquireClientForReadData(pipeline);
-          try (ContainerApi containerClient = new ContainerApiImpl(datanodeClient, token)) {
-            ContainerProtos.ListBlockResponseProto listBlockResponse =
-                containerClient.listBlock(containerID, null, Integer.MAX_VALUE);
+          ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
 
-            for (ContainerProtos.BlockData blockData : listBlockResponse.getBlockDataList()) {
-              missingBlocks.remove(blockData.getBlockID().getLocalID());
-            }
-            if (missingBlocks.isEmpty()) {
-              LOG.debug("All {} blocks in container {} found on replica {} at {}",
-                  blockToKeysMap.keySet().size(), containerID, replica.getReplicaIndex(), replica.getDatanodeDetails());
-            } else {
-              LOG.info("Found {} blocks missing from container {} on replica {} at {}",
-                  missingBlocks.size(), containerID, replica.getReplicaIndex(), replica.getDatanodeDetails());
-              missingBlocks.forEach(b -> affectedKeys.addAll(blockToKeysMap.getOrDefault(b, emptySet())));
-            }
-          } finally {
-            xceiverClientManager.releaseClientForReadData(datanodeClient, false);
+          ContainerProtos.ListBlockResponseProto listBlockResponse =
+              containerClient.listBlock(containerID, null, Integer.MAX_VALUE);
+
+          for (ContainerProtos.BlockData blockData : listBlockResponse.getBlockDataList()) {
+            missingBlocks.remove(blockData.getBlockID().getLocalID());
+          }
+          if (missingBlocks.isEmpty()) {
+            LOG.debug("All {} blocks in container {} found on replica {} at {}",
+                blockToKeysMap.keySet().size(), containerID, replica.getReplicaIndex(), replica.getDatanodeDetails());
+          } else {
+            LOG.info("Found {} blocks missing from container {} on replica {} at {}",
+                missingBlocks.size(), containerID, replica.getReplicaIndex(), replica.getDatanodeDetails());
+            missingBlocks.forEach(b -> affectedKeys.addAll(blockToKeysMap.getOrDefault(b, emptySet())));
           }
         }
       }

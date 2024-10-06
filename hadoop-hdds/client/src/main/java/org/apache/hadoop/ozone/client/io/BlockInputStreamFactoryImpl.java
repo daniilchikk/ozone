@@ -22,7 +22,7 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockInputStream;
@@ -43,7 +43,7 @@ import java.util.function.Supplier;
  */
 public class BlockInputStreamFactoryImpl implements BlockInputStreamFactory {
 
-  private ECBlockInputStreamFactory ecBlockStreamFactory;
+  private final ECBlockInputStreamFactory ecBlockStreamFactory;
 
   public static BlockInputStreamFactory getInstance(
       ByteBufferPool byteBufferPool,
@@ -71,23 +71,24 @@ public class BlockInputStreamFactoryImpl implements BlockInputStreamFactory {
    * @param blockInfo The blockInfo representing the block.
    * @param pipeline The pipeline to be used for reading the block
    * @param token The block Access Token
-   * @param xceiverFactory Factory to create the xceiver in the client
+   * @param containerApiManager Factory to create the xceiver in the client
    * @param refreshFunction Function to refresh the pipeline if needed
    * @return BlockExtendedInputStream of the correct type.
    */
+  @Override
   public BlockExtendedInputStream create(ReplicationConfig repConfig,
       BlockLocationInfo blockInfo, Pipeline pipeline,
       Token<OzoneBlockTokenIdentifier> token,
-      XceiverClientFactory xceiverFactory,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
       OzoneClientConfig config) throws IOException {
     if (repConfig.getReplicationType().equals(HddsProtos.ReplicationType.EC)) {
       return new ECBlockInputStreamProxy((ECReplicationConfig)repConfig,
-          blockInfo, xceiverFactory, refreshFunction,
+          blockInfo, containerApiManager, refreshFunction,
           ecBlockStreamFactory, config);
     } else {
       return new BlockInputStream(blockInfo,
-          pipeline, token, xceiverFactory, refreshFunction,
+          pipeline, token, containerApiManager, refreshFunction,
           config);
     }
   }

@@ -21,38 +21,50 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.crypto.key.KeyProvider;
-import org.apache.hadoop.fs.*;
+import org.apache.hadoop.fs.BlockLocation;
+import org.apache.hadoop.fs.FileAlreadyExistsException;
+import org.apache.hadoop.fs.FileChecksum;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.PathIsNotEmptyDirectoryException;
+import org.apache.hadoop.fs.SafeModeAction;
 import org.apache.hadoop.hdds.client.ReplicatedReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationFactor;
-import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.FinalizeBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetCommittedBlockLengthResponseProto;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline.PipelineState;
-import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReport;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.ozone.OmUtils;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.ozone.OzoneFsServerDefaults;
-import org.apache.hadoop.ozone.client.*;
+import org.apache.hadoop.ozone.client.ObjectStore;
+import org.apache.hadoop.ozone.client.OzoneBucket;
+import org.apache.hadoop.ozone.client.OzoneClient;
+import org.apache.hadoop.ozone.client.OzoneClientFactory;
+import org.apache.hadoop.ozone.client.OzoneKey;
+import org.apache.hadoop.ozone.client.OzoneVolume;
 import org.apache.hadoop.ozone.client.io.OzoneDataStreamOutput;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.client.protocol.ClientProtocol;
 import org.apache.hadoop.ozone.client.rpc.RpcClient;
 import org.apache.hadoop.ozone.container.common.helpers.BlockData;
 import org.apache.hadoop.ozone.om.exceptions.OMException;
-import org.apache.hadoop.ozone.om.helpers.*;
+import org.apache.hadoop.ozone.om.helpers.BucketLayout;
+import org.apache.hadoop.ozone.om.helpers.LeaseKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
+import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
+import org.apache.hadoop.ozone.om.helpers.OzoneFSUtils;
+import org.apache.hadoop.ozone.om.helpers.OzoneFileStatus;
 import org.apache.hadoop.ozone.security.OzoneTokenIdentifier;
 import org.apache.hadoop.ozone.snapshot.SnapshotDiffReportOzone;
 import org.apache.hadoop.ozone.snapshot.SnapshotDiffResponse;
@@ -72,7 +84,10 @@ import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.hadoop.ozone.OzoneConsts.OZONE_URI_DELIMITER;
-import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.*;
+import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.DIRECTORY_NOT_FOUND;
+import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.FILE_NOT_FOUND;
+import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.KEY_NOT_FOUND;
+import static org.apache.hadoop.ozone.om.exceptions.OMException.ResultCodes.NOT_A_FILE;
 import static org.apache.hadoop.ozone.snapshot.SnapshotDiffResponse.JobStatus.DONE;
 
 /**
@@ -86,20 +101,19 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
 
   static final Logger LOG =
       LoggerFactory.getLogger(BasicOzoneClientAdapterImpl.class);
-  public static final String ACTIVE_FS_SNAPSHOT_NAME = ".";
 
-  private OzoneClient ozoneClient;
-  private ObjectStore objectStore;
-  private OzoneVolume volume;
-  private OzoneBucket bucket;
+  private final OzoneClient ozoneClient;
+  private final ObjectStore objectStore;
+  private final OzoneVolume volume;
+  private final OzoneBucket bucket;
   private ReplicationConfig bucketReplicationConfig;
   // Client side configured replication config.
-  private ReplicationConfig clientConfiguredReplicationConfig;
+  private final ReplicationConfig clientConfiguredReplicationConfig;
   private boolean securityEnabled;
-  private int configuredDnPort;
-  private OzoneConfiguration config;
+  private final int configuredDnPort;
+  private final OzoneConfiguration config;
   private long nextReplicationConfigRefreshTime;
-  private long bucketRepConfigRefreshPeriodMS;
+  private final long bucketRepConfigRefreshPeriodMS;
   private java.time.Clock clock = Clock.system(ZoneOffset.UTC);
 
   /**
@@ -476,7 +490,7 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
    */
   public static class IteratorAdapter implements Iterator<BasicKeyInfo> {
 
-    private Iterator<? extends OzoneKey> original;
+    private final Iterator<? extends OzoneKey> original;
 
     public IteratorAdapter(Iterator<? extends OzoneKey> listKeys) {
       this.original = listKeys;
@@ -571,8 +585,8 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
             nameList.add(dn.getHostName() + ":" + port);
           });
 
-      String[] hosts = hostList.toArray(new String[hostList.size()]);
-      String[] names = nameList.toArray(new String[nameList.size()]);
+      String[] hosts = hostList.toArray(new String[0]);
+      String[] names = nameList.toArray(new String[0]);
       BlockLocation blockLocation = new BlockLocation(
           names, hosts, offsetOfBlockInFile,
           omKeyLocationInfo.getLength());
@@ -717,25 +731,18 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
   public long finalizeBlock(OmKeyLocationInfo block) throws IOException {
     incrementCounter(Statistic.INVOCATION_FINALIZE_BLOCK, 1);
     RpcClient rpcClient = (RpcClient) ozoneClient.getProxy();
-    XceiverClientFactory xceiverClientFactory = rpcClient.getXceiverClientManager();
+    ContainerApiManager containerApiManager = rpcClient.getContainerApiManager();
     Pipeline pipeline = block.getPipeline();
-    XceiverClientSpi client = null;
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     try {
       // If pipeline is still open
       if (pipeline.isOpen()) {
-        client = xceiverClientFactory.acquireClient(pipeline);
-        try (ContainerApi containerClient = new ContainerApiImpl(client, block.getToken())) {
-          FinalizeBlockResponseProto finalizeBlockResponseProto =
-              containerClient.finalizeBlock(block.getBlockID().getDatanodeBlockIDProtobuf());
-          return BlockData.getFromProtoBuf(finalizeBlockResponseProto.getBlockData()).getSize();
-        }
+        FinalizeBlockResponseProto finalizeBlockResponseProto =
+            containerClient.finalizeBlock(block.getBlockID().getDatanodeBlockIDProtobuf());
+        return BlockData.getFromProtoBuf(finalizeBlockResponseProto.getBlockData()).getSize();
       }
     } catch (IOException e) {
       LOG.warn("Failed to execute finalizeBlock command", e);
-    } finally {
-      if (client != null) {
-        xceiverClientFactory.releaseClient(client, false);
-      }
     }
 
     // Try fetch block committed length from DN
@@ -745,28 +752,9 @@ public class BasicOzoneClientAdapterImpl implements OzoneClientAdapter {
           " is not supported in finalizeBlock");
     }
 
-    StandaloneReplicationConfig newConfig =
-        StandaloneReplicationConfig.getInstance(((ReplicatedReplicationConfig) replicationConfig)
-            .getReplicationFactor());
-
-    Pipeline.Builder builder = Pipeline.newBuilder()
-        .setReplicationConfig(newConfig)
-        .setId(PipelineID.randomId())
-        .setNodes(block.getPipeline().getNodes())
-        .setState(PipelineState.OPEN);
-
-    try {
-      client = xceiverClientFactory.acquireClientForReadData(builder.build());
-      try (ContainerApi containerClient = new ContainerApiImpl(client, block.getToken())) {
-        GetCommittedBlockLengthResponseProto responseProto =
-            containerClient.getCommittedBlockLength(block.getBlockID());
-        return responseProto.getBlockLength();
-      }
-    } finally {
-      if (client != null) {
-        xceiverClientFactory.releaseClient(client, false);
-      }
-    }
+    GetCommittedBlockLengthResponseProto responseProto =
+        containerClient.getCommittedBlockLength(block.getBlockID());
+    return responseProto.getBlockLength();
   }
 
   @Override

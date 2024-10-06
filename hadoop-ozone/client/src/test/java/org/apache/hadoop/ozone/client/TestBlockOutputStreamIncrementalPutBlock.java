@@ -18,6 +18,24 @@
 
 package org.apache.hadoop.ozone.client;
 
+import jakarta.annotation.Nonnull;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.hadoop.hdds.client.ReplicationConfig;
+import org.apache.hadoop.hdds.conf.ConfigurationSource;
+import org.apache.hadoop.hdds.conf.InMemoryConfiguration;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.scm.OzoneClientConfig;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.ozone.OzoneConfigKeys;
+import org.apache.hadoop.ozone.client.io.OzoneInputStream;
+import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
+import org.apache.hadoop.ozone.client.rpc.RpcClient;
+import org.apache.hadoop.ozone.om.helpers.ServiceInfoEx;
+import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -25,26 +43,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.UUID;
 
-import jakarta.annotation.Nonnull;
-import org.apache.hadoop.ozone.OzoneConfigKeys;
-import org.apache.hadoop.ozone.om.helpers.ServiceInfoEx;
-
-import org.apache.commons.lang3.RandomStringUtils;
-import org.apache.hadoop.hdds.client.ReplicationConfig;
-import org.apache.hadoop.hdds.conf.ConfigurationSource;
-import org.apache.hadoop.hdds.conf.InMemoryConfiguration;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.ozone.client.io.OzoneInputStream;
-import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
-import org.apache.hadoop.ozone.client.rpc.RpcClient;
-import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
-
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.mockito.Mockito.mock;
 
 
 /**
@@ -80,16 +80,15 @@ public class TestBlockOutputStreamIncrementalPutBlock {
 
       @Override
       protected OmTransport createOmTransport(
-          String omServiceId)
-          throws IOException {
+          String omServiceId) {
         return new MockOmTransport();
       }
 
       @Nonnull
       @Override
-      protected XceiverClientFactory createXceiverClientFactory(
-          ServiceInfoEx serviceInfo) throws IOException {
-        return new MockXceiverClientFactory();
+      protected ContainerApiManager createContainerApiManager(
+          ServiceInfoEx serviceInfo) {
+        return mock(ContainerApiManager.class);
       }
     };
 
@@ -114,7 +113,7 @@ public class TestBlockOutputStreamIncrementalPutBlock {
     init(incrementalChunkList);
 
     int size = 1024;
-    String s = RandomStringUtils.randomAlphabetic(1024);
+    String s = RandomStringUtils.secure().nextAlphabetic(1024);
     ByteBuffer byteBuffer = ByteBuffer.wrap(s.getBytes(StandardCharsets.UTF_8));
 
     try (OzoneOutputStream out = bucket.createKey(keyName, size,

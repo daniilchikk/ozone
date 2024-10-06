@@ -17,19 +17,19 @@
  */
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 
 /**
  * A dummy BlockInputStream to mock read block call to DN.
@@ -46,14 +46,13 @@ class DummyBlockInputStream extends BlockInputStream {
       long blockLen,
       Pipeline pipeline,
       Token<OzoneBlockTokenIdentifier> token,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
       List<ChunkInfo> chunkList,
       Map<String, byte[]> chunks,
       OzoneClientConfig config) throws IOException {
     super(new BlockLocationInfo(new BlockLocationInfo.Builder().setBlockID(blockId).setLength(blockLen)),
-        pipeline, token,
-        xceiverClientManager, refreshFunction, config);
+        pipeline, token, containerApiManager, refreshFunction, config);
     this.chunkDataMap = chunks;
     this.chunks = chunkList;
 
@@ -74,7 +73,7 @@ class DummyBlockInputStream extends BlockInputStream {
   }
 
   @Override
-  protected synchronized void checkOpen() throws IOException {
+  protected synchronized void checkOpen() {
     // No action needed
   }
 }

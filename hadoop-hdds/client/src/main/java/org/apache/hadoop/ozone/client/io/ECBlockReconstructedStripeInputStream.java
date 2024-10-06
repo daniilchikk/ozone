@@ -25,6 +25,7 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
 import org.apache.hadoop.hdds.scm.storage.ByteReaderStrategy;
@@ -154,13 +155,13 @@ public class ECBlockReconstructedStripeInputStream extends ECBlockInputStream {
   @SuppressWarnings("checkstyle:ParameterNumber")
   public ECBlockReconstructedStripeInputStream(ECReplicationConfig repConfig,
       BlockLocationInfo blockInfo,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
       BlockInputStreamFactory streamFactory,
       ByteBufferPool byteBufferPool,
       ExecutorService ecReconstructExecutor,
       OzoneClientConfig config) {
-    super(repConfig, blockInfo, xceiverClientFactory,
+    super(repConfig, blockInfo, containerApiManager,
         refreshFunction, streamFactory, config);
     this.byteBufferPool = byteBufferPool;
     this.executor = ecReconstructExecutor;

@@ -242,7 +242,6 @@ class TestKeyInputStream extends TestInputStreamBase {
   }
 
   public void testSeek(TestBucket bucket) throws Exception {
-    XceiverClientManager.resetXceiverClientMetrics();
     XceiverClientMetrics metrics = XceiverClientManager
         .getXceiverClientMetrics();
     long writeChunkCount = metrics.getContainerOpCountMetrics(
@@ -327,7 +326,6 @@ class TestKeyInputStream extends TestInputStreamBase {
   }
 
   private void testSkip(TestBucket bucket) throws Exception {
-    XceiverClientManager.resetXceiverClientMetrics();
     XceiverClientMetrics metrics = XceiverClientManager
         .getXceiverClientMetrics();
     long writeChunkCount = metrics.getContainerOpCountMetrics(

@@ -24,7 +24,7 @@
  */
 package org.apache.hadoop.hdds.scm.storage;
 
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.ozone.common.ChunkBuffer;
 
 /**
@@ -35,8 +35,8 @@ class CommitWatcher extends AbstractCommitWatcher<ChunkBuffer> {
   // A reference to the pool of buffers holding the data
   private final BufferPool bufferPool;
 
-  CommitWatcher(BufferPool bufferPool, XceiverClientSpi xceiverClient) {
-    super(xceiverClient);
+  CommitWatcher(BufferPool bufferPool, ContainerApi containerClient) {
+    super(containerClient);
     this.bufferPool = bufferPool;
   }
 

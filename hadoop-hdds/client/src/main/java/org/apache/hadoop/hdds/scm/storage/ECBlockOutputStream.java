@@ -23,9 +23,13 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
-import org.apache.hadoop.hdds.scm.*;
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
+import org.apache.hadoop.hdds.scm.OzoneClientConfig;
+import org.apache.hadoop.hdds.scm.StreamBufferArgs;
+import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.validator.ResponseValidatorFactory;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.common.ChunkBuffer;
@@ -36,7 +40,13 @@ import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -50,23 +60,22 @@ import java.util.stream.Collectors;
 public class ECBlockOutputStream extends BlockOutputStream {
 
   private final DatanodeDetails datanodeDetails;
-  private CompletableFuture<ContainerProtos.ContainerCommandResponseProto>
+  private CompletableFuture<ContainerCommandResponseProto>
       currentChunkRspFuture = null;
 
-  private CompletableFuture<ContainerProtos.ContainerCommandResponseProto>
+  private CompletableFuture<ContainerCommandResponseProto>
       putBlkRspFuture = null;
   /**
    * Creates a new ECBlockOutputStream.
    *
    * @param blockID              block ID
-   * @param xceiverClientManager client manager that controls client
+   * @param containerApiManager client manager that controls client
    * @param pipeline             pipeline where block will be written
    * @param bufferPool           pool of buffers
    */
-  @SuppressWarnings("checkstyle:ParameterNumber")
   public ECBlockOutputStream(
       BlockID blockID,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       Pipeline pipeline,
       BufferPool bufferPool,
       OzoneClientConfig config,
@@ -74,7 +83,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
       ContainerClientMetrics clientMetrics, StreamBufferArgs streamBufferArgs,
       Supplier<ExecutorService> executorServiceSupplier
   ) throws IOException {
-    super(blockID, -1, xceiverClientManager,
+    super(blockID, -1, containerApiManager,
         pipeline, bufferPool, config, token, clientMetrics, streamBufferArgs, executorServiceSupplier);
     // In EC stream, there will be only one node in pipeline.
     this.datanodeDetails = pipeline.getClosestNode();
@@ -88,12 +97,12 @@ public class ECBlockOutputStream extends BlockOutputStream {
     updateWrittenDataLength(len);
   }
 
-  public CompletableFuture<ContainerProtos.ContainerCommandResponseProto> write(
+  public CompletableFuture<ContainerCommandResponseProto> write(
       ByteBuffer buff) throws IOException {
     return writeChunkToContainer(ChunkBuffer.wrap(buff));
   }
 
-  public CompletableFuture<ContainerProtos.
+  public CompletableFuture<
       ContainerCommandResponseProto> executePutBlock(boolean close,
       boolean force, long blockGroupLength, BlockData[] blockData)
       throws IOException {
@@ -122,7 +131,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
         blockID = bd.getBlockID();
       }
       List<ChunkInfo> chunks = bd.getChunks();
-      if (chunks != null && chunks.size() > 0) {
+      if (chunks != null && !chunks.isEmpty()) {
         if (chunks.get(0).hasStripeChecksum()) {
           checksumBlockData = bd;
           break;
@@ -197,9 +206,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
     return executePutBlock(close, force, blockGroupLength);
   }
 
-  public CompletableFuture<ContainerProtos.
-      ContainerCommandResponseProto> executePutBlock(boolean close,
-      boolean force, long blockGroupLength, ByteString checksum)
+  public void executePutBlock(boolean close, boolean force, long blockGroupLength, ByteString checksum)
       throws IOException {
 
     ECReplicationConfig repConfig = (ECReplicationConfig)
@@ -212,10 +219,10 @@ public class ECBlockOutputStream extends BlockOutputStream {
         getReplicationIndex() <= (totalNodes - parity))) {
       updateChecksum(checksum);
     }
-    return executePutBlock(close, force, blockGroupLength);
+    executePutBlock(close, force, blockGroupLength);
   }
 
-  public CompletableFuture<ContainerProtos.
+  public CompletableFuture<
       ContainerCommandResponseProto> executePutBlock(boolean close,
       boolean force, long blockGroupLength) throws IOException {
     updateBlockGroupLengthInPutBlockMeta(blockGroupLength);
@@ -257,14 +264,14 @@ public class ECBlockOutputStream extends BlockOutputStream {
       boolean force) throws IOException {
     checkOpen();
 
-    CompletableFuture<ContainerProtos.
+    CompletableFuture<
         ContainerCommandResponseProto> flushFuture;
-    try (ContainerApi containerClient = new ContainerApiImpl(getXceiverClient(), getToken())) {
+    try {
       ContainerProtos.BlockData blockData = getContainerBlockData().build();
 
-      XceiverClientReply asyncReply = containerClient.putBlockAsync(blockData, close);
+      XceiverClientReply asyncReply = getContainerClient().putBlockAsync(blockData, close);
 
-      CompletableFuture<ContainerProtos.ContainerCommandResponseProto> future =
+      CompletableFuture<ContainerCommandResponseProto> future =
           asyncReply.getResponse();
       flushFuture = future.thenApplyAsync(e -> {
         try {
@@ -304,7 +311,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
   /**
    * @return The current chunk writer response future.
    */
-  public CompletableFuture<ContainerProtos.ContainerCommandResponseProto>
+  public CompletableFuture<ContainerCommandResponseProto>
       getCurrentChunkResponseFuture() {
     return this.currentChunkRspFuture;
   }
@@ -312,7 +319,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
   /**
    * @return The current chunk putBlock response future.
    */
-  public CompletableFuture<ContainerProtos.ContainerCommandResponseProto>
+  public CompletableFuture<ContainerCommandResponseProto>
       getCurrentPutBlkResponseFuture() {
     return this.putBlkRspFuture;
   }
@@ -326,9 +333,7 @@ public class ECBlockOutputStream extends BlockOutputStream {
   }
 
   @Override
-  void validateResponse(
-      ContainerProtos.ContainerCommandResponseProto responseProto)
-      throws IOException {
+  void validateResponse(ContainerCommandResponseProto responseProto) throws IOException {
     try {
       // if the ioException is already set, it means a prev request has failed
       // just throw the exception. The current operation will fail with the
@@ -337,9 +342,14 @@ public class ECBlockOutputStream extends BlockOutputStream {
       if (exception != null) {
         return;
       }
-      ContainerProtocolCalls.validateContainerResponse(responseProto);
+      ResponseValidatorFactory.getDefault().get(0).accept(null, responseProto);
     } catch (IOException sce) {
       setIoException(sce);
     }
+  }
+
+  @Override
+  void cleanup() {
+
   }
 }

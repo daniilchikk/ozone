@@ -17,17 +17,16 @@
  */
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.common.utils.BufferUtils;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
+
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A dummy ChunkInputStream to mock read chunk calls to DN.
@@ -41,10 +40,10 @@ public class DummyChunkInputStream extends ChunkInputStream {
 
   public DummyChunkInputStream(ChunkInfo chunkInfo,
       BlockID blockId,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       boolean verifyChecksum,
       byte[] data, Pipeline pipeline) {
-    super(chunkInfo, blockId, xceiverClientFactory, () -> pipeline,
+    super(chunkInfo, blockId, containerApiManager, () -> pipeline,
         verifyChecksum, () -> null);
     this.chunkData = data.clone();
   }
@@ -58,11 +57,7 @@ public class DummyChunkInputStream extends ChunkInputStream {
     int bufferLen;
     readByteBuffers.clear();
     while (remainingToRead > 0) {
-      if (remainingToRead < bufferCapacity) {
-        bufferLen = remainingToRead;
-      } else {
-        bufferLen = bufferCapacity;
-      }
+      bufferLen = Math.min(remainingToRead, bufferCapacity);
       ByteString byteString = ByteString.copyFrom(chunkData,
           offset, bufferLen);
 
@@ -74,16 +69,6 @@ public class DummyChunkInputStream extends ChunkInputStream {
 
     return BufferUtils.getReadOnlyByteBuffers(readByteBuffers)
         .toArray(new ByteBuffer[0]);
-  }
-
-  @Override
-  protected void acquireClient() {
-    // No action needed
-  }
-
-  @Override
-  protected void releaseClient() {
-    // no-op
   }
 
   public List<ByteString> getReadByteBuffers() {

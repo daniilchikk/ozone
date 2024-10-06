@@ -21,7 +21,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.storage.BlockDataStreamOutput;
 import org.apache.hadoop.hdds.scm.storage.ByteBufferStreamOutput;
@@ -45,19 +45,19 @@ public final class BlockDataStreamOutputEntry
   private ByteBufferStreamOutput byteBufferStreamOutput;
   private BlockID blockID;
   private final String key;
-  private final XceiverClientFactory xceiverClientManager;
+  private final ContainerApiManager containerApiManager;
   private final Pipeline pipeline;
   // total number of bytes that should be written to this stream
   private final long length;
   // the current position of this stream 0 <= currentPosition < length
   private long currentPosition;
   private final Token<OzoneBlockTokenIdentifier> token;
-  private List<StreamBuffer> bufferList;
+  private final List<StreamBuffer> bufferList;
 
   @SuppressWarnings({"parameternumber", "squid:S00107"})
   private BlockDataStreamOutputEntry(
       BlockID blockID, String key,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       Pipeline pipeline,
       long length,
       Token<OzoneBlockTokenIdentifier> token,
@@ -68,16 +68,12 @@ public final class BlockDataStreamOutputEntry
     this.byteBufferStreamOutput = null;
     this.blockID = blockID;
     this.key = key;
-    this.xceiverClientManager = xceiverClientManager;
+    this.containerApiManager = containerApiManager;
     this.pipeline = pipeline;
     this.token = token;
     this.length = length;
     this.currentPosition = 0;
     this.bufferList = bufferList;
-  }
-
-  long getLength() {
-    return length;
   }
 
   Token<OzoneBlockTokenIdentifier> getToken() {
@@ -97,7 +93,7 @@ public final class BlockDataStreamOutputEntry
   private void checkStream() throws IOException {
     if (this.byteBufferStreamOutput == null) {
       this.byteBufferStreamOutput =
-          new BlockDataStreamOutput(blockID, xceiverClientManager, pipeline,
+          new BlockDataStreamOutput(blockID, containerApiManager, pipeline,
               config, token, bufferList);
     }
   }
@@ -194,7 +190,7 @@ public final class BlockDataStreamOutputEntry
 
     private BlockID blockID;
     private String key;
-    private XceiverClientFactory xceiverClientManager;
+    private ContainerApiManager containerApiManager;
     private Pipeline pipeline;
     private long length;
     private Token<OzoneBlockTokenIdentifier> token;
@@ -211,10 +207,8 @@ public final class BlockDataStreamOutputEntry
       return this;
     }
 
-    public Builder setXceiverClientManager(
-        XceiverClientFactory
-        xClientManager) {
-      this.xceiverClientManager = xClientManager;
+    public Builder setContainerApiManager(ContainerApiManager containerApiManager) {
+      this.containerApiManager = containerApiManager;
       return this;
     }
 
@@ -247,7 +241,7 @@ public final class BlockDataStreamOutputEntry
     public BlockDataStreamOutputEntry build() {
       return new BlockDataStreamOutputEntry(blockID,
           key,
-          xceiverClientManager,
+          containerApiManager,
           pipeline,
           length,
           token, config, bufferList);
@@ -255,7 +249,7 @@ public final class BlockDataStreamOutputEntry
   }
 
   @VisibleForTesting
-  public ByteBufferStreamOutput getByteBufStreamOutput() {
+  public ByteBufferStreamOutput getByteBufferStreamOutput() {
     return byteBufferStreamOutput;
   }
 
@@ -267,8 +261,8 @@ public final class BlockDataStreamOutputEntry
     return key;
   }
 
-  public XceiverClientFactory getXceiverClientManager() {
-    return xceiverClientManager;
+  public ContainerApiManager getContainerApiManager() {
+    return containerApiManager;
   }
 
   public Pipeline getPipeline() {

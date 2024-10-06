@@ -17,13 +17,6 @@
 
 package org.apache.hadoop.ozone.client.rpc;
 
-import java.io.File;
-import java.io.IOException;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.client.RatisReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
@@ -35,8 +28,9 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.ratis.conf.RatisClientConfig;
 import org.apache.hadoop.hdds.scm.ScmConfig;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.utils.IOUtils;
@@ -61,6 +55,17 @@ import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.ozone.test.GenericTestUtils;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import java.io.File;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_COMMAND_STATUS_REPORT_INTERVAL;
@@ -75,10 +80,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 
 /**
  * Tests delete key operation with inadequate datanodes.
@@ -86,13 +87,11 @@ import org.junit.jupiter.api.Test;
 public class TestDeleteWithInAdequateDN {
 
   private static MiniOzoneCluster cluster;
-  private static OzoneConfiguration conf;
   private static OzoneClient client;
   private static ObjectStore objectStore;
   private static String volumeName;
   private static String bucketName;
-  private static String path;
-  private static XceiverClientManager xceiverClientManager;
+  private static ContainerApiManager containerApiManager;
   private static final int FACTOR_THREE_PIPELINE_COUNT = 1;
 
   /**
@@ -104,8 +103,8 @@ public class TestDeleteWithInAdequateDN {
   public static void init() throws Exception {
     final int numOfDatanodes = 3;
 
-    conf = new OzoneConfiguration();
-    path = GenericTestUtils
+    OzoneConfiguration conf = new OzoneConfiguration();
+    String path = GenericTestUtils
         .getTempPath(TestContainerStateMachineFailures.class.getSimpleName());
     File baseDir = new File(path);
     baseDir.mkdirs();
@@ -170,7 +169,7 @@ public class TestDeleteWithInAdequateDN {
     //the easiest way to create an open container is creating a key
     client = OzoneClientFactory.getRpcClient(conf);
     objectStore = client.getObjectStore();
-    xceiverClientManager = new XceiverClientManager(conf);
+    containerApiManager = new ContainerApiManagerImpl();
     volumeName = "testcontainerstatemachinefailures";
     bucketName = volumeName;
     objectStore.createVolume(volumeName);
@@ -183,8 +182,8 @@ public class TestDeleteWithInAdequateDN {
   @AfterAll
   public static void shutdown() {
     IOUtils.closeQuietly(client);
-    if (xceiverClientManager != null) {
-      xceiverClientManager.close();
+    if (containerApiManager != null) {
+      containerApiManager.close();
     }
     if (cluster != null) {
       cluster.shutdown();
@@ -230,7 +229,7 @@ public class TestDeleteWithInAdequateDN {
     List<Pipeline> pipelineList =
         cluster.getStorageContainerManager().getPipelineManager()
             .getPipelines(RatisReplicationConfig.getInstance(THREE));
-    Assumptions.assumeTrue(pipelineList.size() >= FACTOR_THREE_PIPELINE_COUNT);
+    Assumptions.assumeTrue(!pipelineList.isEmpty());
     Pipeline pipeline = pipelineList.get(0);
     for (HddsDatanodeService dn : cluster.getHddsDatanodes()) {
       if (RatisTestHelper.isRatisFollower(dn, pipeline)) {
@@ -256,13 +255,8 @@ public class TestDeleteWithInAdequateDN {
     request.setContainerID(containerID);
     request.setCloseContainer(
         ContainerProtos.CloseContainerRequestProto.getDefaultInstance());
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
-    try {
-      xceiverClient.sendCommand(request.build());
-    } finally {
-      xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+    containerClient.closeContainer(containerID);
 
     ContainerStateMachine stateMachine =
         (ContainerStateMachine) RatisTestHelper

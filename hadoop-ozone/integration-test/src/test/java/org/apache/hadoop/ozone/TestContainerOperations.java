@@ -26,10 +26,11 @@ package org.apache.hadoop.ozone;
  import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
  import org.apache.hadoop.hdds.scm.PlacementPolicy;
  import org.apache.hadoop.hdds.scm.ScmConfigKeys;
- import org.apache.hadoop.hdds.scm.XceiverClientManager;
- import org.apache.hadoop.hdds.scm.XceiverClientSpi;
  import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
+ import org.apache.hadoop.hdds.scm.client.ContainerApi;
  import org.apache.hadoop.hdds.scm.client.ScmClient;
+ import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+ import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
  import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
  import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
  import org.apache.hadoop.hdds.scm.ha.SCMHAUtils;
@@ -37,8 +38,6 @@ package org.apache.hadoop.ozone;
  import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
  import org.apache.hadoop.hdds.scm.pipeline.PipelineNotFoundException;
  import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
- import org.apache.hadoop.hdds.scm.client.ContainerApi;
- import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
  import org.apache.hadoop.io.IOUtils;
  import org.apache.hadoop.ozone.container.ContainerTestHelper;
  import org.junit.jupiter.api.AfterAll;
@@ -48,24 +47,26 @@ package org.apache.hadoop.ozone;
 
  import java.io.IOException;
  import java.util.List;
- import java.util.concurrent.TimeUnit;
 
  import static java.nio.charset.StandardCharsets.UTF_8;
  import static org.apache.hadoop.hdds.protocol.DatanodeDetails.Port.Name.REPLICATION;
  import static org.assertj.core.api.Assertions.assertThat;
- import static org.junit.jupiter.api.Assertions.*;
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+ import static org.junit.jupiter.api.Assertions.assertThrows;
+ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * This class tests container operations (TODO currently only supports create)
  * from cblock clients.
  */
-@Timeout(value = 300, unit = TimeUnit.SECONDS)
+@Timeout(value = 300)
 public class TestContainerOperations {
   private static ScmClient storageClient;
   private static MiniOzoneCluster cluster;
   private static StorageContainerLocationProtocolClientSideTranslatorPB
       storageContainerLocationClient;
-  private static XceiverClientManager xceiverClientManager;
+  private static ContainerApiManager containerApiManager;
 
   @BeforeAll
   public static void setup() throws Exception {
@@ -77,7 +78,7 @@ public class TestContainerOperations {
     cluster.waitForClusterToBeReady();
     storageContainerLocationClient =
         cluster.getStorageContainerLocationClient();
-    xceiverClientManager = new XceiverClientManager(ozoneConf);
+    containerApiManager = new ContainerApiManagerImpl();
   }
 
   @AfterAll
@@ -95,34 +96,31 @@ public class TestContainerOperations {
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
     long containerID = container.getContainerInfo().getContainerID();
     Pipeline pipeline = container.getPipeline();
-    XceiverClientSpi client = xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     //create the container
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.createContainer(containerID);
-      // call create Container again
-      BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
-      byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(0, 1024)).getBytes(UTF_8);
-      ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-          ContainerTestHelper
-              .getWriteChunkRequest(container.getPipeline(), blockID,
-                  data.length);
-      client.sendCommand(writeChunkRequest);
+    containerClient.createContainer(containerID);
+    // call create Container again
+    BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
+    byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(0, 1024)).getBytes(UTF_8);
+    ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
+        ContainerTestHelper
+            .getWriteChunkRequest(container.getPipeline(), blockID,
+                data.length);
+    containerClient.writeChunk();
 
-      //Make the write chunk request again without requesting for overWrite
-      client.sendCommand(writeChunkRequest);
-      // Now, explicitly make a putKey request for the block.
-      ContainerProtos.ContainerCommandRequestProto putKeyRequest =
-          ContainerTestHelper
-              .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
-      client.sendCommand(putKeyRequest).getPutBlock();
-      // send the putBlock again
-      client.sendCommand(putKeyRequest);
+    //Make the write chunk request again without requesting for overWrite
+    containerClient.writeChunk();
+    // Now, explicitly make a putKey request for the block.
+    ContainerProtos.ContainerCommandRequestProto putKeyRequest =
+        ContainerTestHelper
+            .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
+    containerClient.putBlock();
+    // send the putBlock again
+    containerClient.putBlock();
 
-      // close container call
-      containerClient.closeContainer(containerID);
-      containerClient.closeContainer(containerID);
-    }
-    xceiverClientManager.releaseClient(client, false);
+    // close container call
+    containerClient.closeContainer(containerID);
+    containerClient.closeContainer(containerID);
   }
 
   /**

@@ -31,11 +31,10 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkResponseProto;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi.Validator;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.validator.ResponseValidatorFactory;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.common.Checksum;
 import org.apache.hadoop.ozone.common.ChecksumData;
@@ -65,8 +64,7 @@ public class ChunkInputStream extends InputStream
   private final long length;
   private final BlockID blockID;
   private ContainerProtos.DatanodeBlockID datanodeBlockID;
-  private final XceiverClientFactory xceiverClientFactory;
-  private XceiverClientSpi xceiverClient;
+  private final ContainerApiManager containerApiManager;
   private final Supplier<Pipeline> pipelineSupplier;
   private final boolean verifyChecksum;
   private boolean allocated = false;
@@ -94,7 +92,7 @@ public class ChunkInputStream extends InputStream
   // The number of bytes of chunk data residing in the buffers currently
   private long buffersSize;
 
-  // Position of the ChunkInputStream is maintained by this variable (if a
+  // Position of the ChunkInputStream is maintained by this variable if a
   // seek is performed. This position is w.r.t to the chunk only and not the
   // block or key. This variable is also set before attempting a read to enable
   // retry.  Once the chunk is read, this variable is reset.
@@ -106,18 +104,18 @@ public class ChunkInputStream extends InputStream
   private final List<Validator> validators;
 
   ChunkInputStream(ChunkInfo chunkInfo, BlockID blockId,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Supplier<Pipeline> pipelineSupplier,
       boolean verifyChecksum,
       Supplier<Token<?>> tokenSupplier) {
     this.chunkInfo = chunkInfo;
     this.length = chunkInfo.getLen();
     this.blockID = blockId;
-    this.xceiverClientFactory = xceiverClientFactory;
+    this.containerApiManager = containerApiManager;
     this.pipelineSupplier = pipelineSupplier;
     this.verifyChecksum = verifyChecksum;
     this.tokenSupplier = tokenSupplier;
-    validators = ContainerProtocolCalls.toValidatorList(this::validateChunk);
+    validators = ResponseValidatorFactory.createValidators(this::validateChunk);
   }
 
   public synchronized long getRemaining() {
@@ -129,7 +127,8 @@ public class ChunkInputStream extends InputStream
    */
   @Override
   public synchronized int read() throws IOException {
-    acquireClient();
+    updateDatanodeBlockId(pipelineSupplier.get());
+
     int available = prepareRead(1);
     int dataout = EOF;
 
@@ -172,7 +171,7 @@ public class ChunkInputStream extends InputStream
     if (len == 0) {
       return 0;
     }
-    acquireClient();
+    updateDatanodeBlockId(pipelineSupplier.get());
     int total = 0;
     while (len > 0) {
       int available = prepareRead(len);
@@ -203,7 +202,7 @@ public class ChunkInputStream extends InputStream
     if (len == 0) {
       return 0;
     }
-    acquireClient();
+    updateDatanodeBlockId(pipelineSupplier.get());
     int total = 0;
     while (len > 0) {
       int available = prepareRead(len);
@@ -285,14 +284,6 @@ public class ChunkInputStream extends InputStream
   @Override
   public synchronized void close() {
     releaseBuffers();
-    releaseClient();
-  }
-
-  protected synchronized void releaseClient() {
-    if (xceiverClientFactory != null && xceiverClient != null) {
-      xceiverClientFactory.releaseClientForReadData(xceiverClient, false);
-      xceiverClient = null;
-    }
   }
 
   /**
@@ -306,17 +297,6 @@ public class ChunkInputStream extends InputStream
       builder.setReplicaIndex(replicaIdx);
     }
     datanodeBlockID = builder.build();
-  }
-
-  /**
-   * Acquire new client if previous one was released.
-   */
-  protected synchronized void acquireClient() throws IOException {
-    if (xceiverClientFactory != null && xceiverClient == null) {
-      Pipeline pipeline = pipelineSupplier.get();
-      xceiverClient = xceiverClientFactory.acquireClientForReadData(pipeline);
-      updateDatanodeBlockId(pipeline);
-    }
   }
 
   /**
@@ -437,23 +417,22 @@ public class ChunkInputStream extends InputStream
    * Send RPC call to get the chunk from the container.
    */
   @VisibleForTesting
-  protected ByteBuffer[] readChunk(ChunkInfo readChunkInfo)
-      throws IOException {
+  protected ByteBuffer[] readChunk(ChunkInfo readChunkInfo) throws IOException {
 
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, tokenSupplier.get(), validators)) {
-      ReadChunkResponseProto readChunkResponse = containerClient.readChunk(readChunkInfo, datanodeBlockID);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipelineSupplier.get());
 
-      if (readChunkResponse.hasData()) {
-        return readChunkResponse.getData().asReadOnlyByteBufferList()
-            .toArray(new ByteBuffer[0]);
-      } else if (readChunkResponse.hasDataBuffers()) {
-        List<ByteString> buffersList = readChunkResponse.getDataBuffers()
-            .getBuffersList();
-        return BufferUtils.getReadOnlyByteBuffersArray(buffersList);
-      } else {
-        throw new IOException("Unexpected error while reading chunk data " +
-            "from container. No data returned.");
-      }
+    ReadChunkResponseProto readChunkResponse = containerClient.readChunk(readChunkInfo, datanodeBlockID);
+
+    if (readChunkResponse.hasData()) {
+      return readChunkResponse.getData().asReadOnlyByteBufferList()
+          .toArray(new ByteBuffer[0]);
+    } else if (readChunkResponse.hasDataBuffers()) {
+      List<ByteString> buffersList = readChunkResponse.getDataBuffers()
+          .getBuffersList();
+      return BufferUtils.getReadOnlyByteBuffersArray(buffersList);
+    } else {
+      throw new IOException("Unexpected error while reading chunk data " +
+          "from container. No data returned.");
     }
   }
 
@@ -744,7 +723,6 @@ public class ChunkInputStream extends InputStream
   public synchronized void unbuffer() {
     storePosition();
     releaseBuffers();
-    releaseClient();
   }
 
   @VisibleForTesting

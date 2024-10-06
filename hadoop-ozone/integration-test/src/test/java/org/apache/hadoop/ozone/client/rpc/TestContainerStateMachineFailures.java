@@ -17,21 +17,6 @@
 
 package org.apache.hadoop.ozone.client.rpc;
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.hdds.HddsUtils;
@@ -45,9 +30,10 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.ratis.conf.RatisClientConfig;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerNotOpenException;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.utils.IOUtils;
@@ -79,6 +65,29 @@ import org.apache.hadoop.ozone.protocol.commands.SCMCommand;
 import org.apache.ozone.test.GenericTestUtils;
 import org.apache.ozone.test.LambdaTestUtils;
 import org.apache.ozone.test.tag.Flaky;
+import org.apache.ratis.protocol.RaftGroupId;
+import org.apache.ratis.protocol.exceptions.StateMachineException;
+import org.apache.ratis.server.storage.FileInfo;
+import org.apache.ratis.statemachine.impl.SimpleStateMachineStorage;
+import org.apache.ratis.statemachine.impl.StatemachineImplTestUtil;
+import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_COMMAND_STATUS_REPORT_INTERVAL;
@@ -90,26 +99,15 @@ import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Con
 import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_STALENODE_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
-
-import org.apache.ratis.protocol.RaftGroupId;
-import org.apache.ratis.protocol.exceptions.StateMachineException;
-import org.apache.ratis.server.storage.FileInfo;
-import org.apache.ratis.statemachine.impl.SimpleStateMachineStorage;
-
-import org.apache.ratis.statemachine.impl.StatemachineImplTestUtil;
-import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 
 /**
  * Tests the containerStateMachine failure handling.
@@ -117,13 +115,11 @@ import org.junit.jupiter.api.Test;
 public class TestContainerStateMachineFailures {
 
   private static MiniOzoneCluster cluster;
-  private static OzoneConfiguration conf;
   private static OzoneClient client;
   private static ObjectStore objectStore;
   private static String volumeName;
   private static String bucketName;
-  private static XceiverClientManager xceiverClientManager;
-  private static Random random;
+  private static ContainerApiManager containerApiManager;
 
   /**
    * Create a MiniDFSCluster for testing.
@@ -132,7 +128,7 @@ public class TestContainerStateMachineFailures {
    */
   @BeforeAll
   public static void init() throws Exception {
-    conf = new OzoneConfiguration();
+    OzoneConfiguration conf = new OzoneConfiguration();
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setStreamBufferFlushDelay(false);
@@ -178,12 +174,11 @@ public class TestContainerStateMachineFailures {
     //the easiest way to create an open container is creating a key
     client = OzoneClientFactory.getRpcClient(conf);
     objectStore = client.getObjectStore();
-    xceiverClientManager = new XceiverClientManager(conf);
+    containerApiManager = new ContainerApiManagerImpl();
     volumeName = "testcontainerstatemachinefailures";
     bucketName = volumeName;
     objectStore.createVolume(volumeName);
     objectStore.getVolume(volumeName).createBucket(bucketName);
-    random = new Random();
   }
 
   /**
@@ -192,8 +187,8 @@ public class TestContainerStateMachineFailures {
   @AfterAll
   public static void shutdown() {
     IOUtils.closeQuietly(client);
-    if (xceiverClientManager != null) {
-      xceiverClientManager.close();
+    if (containerApiManager != null) {
+      containerApiManager.close();
     }
     if (cluster != null) {
       cluster.shutdown();
@@ -295,7 +290,7 @@ public class TestContainerStateMachineFailures {
       // and allocation to new pipeline will fail as there is no other dn in
       // the cluster
       key.close();
-    } catch (IOException ioe) {
+    } catch (IOException ignored) {
     }
     long containerID = omKeyLocationInfo.getContainerID();
 
@@ -354,7 +349,7 @@ public class TestContainerStateMachineFailures {
       // and allocation to new pipeline will fail as there is no other dn in
       // the cluster
       key.close();
-    } catch (IOException ioe) {
+    } catch (IOException ignored) {
     }
 
     long containerID = omKeyLocationInfo.getContainerID();
@@ -449,8 +444,7 @@ public class TestContainerStateMachineFailures {
     FileUtil.fullyDelete(new File(keyValueContainerData.getContainerPath()));
     Pipeline pipeline = cluster.getStorageContainerLocationClient()
         .getContainerWithPipeline(containerID).getPipeline();
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     ContainerProtos.ContainerCommandRequestProto.Builder request =
         ContainerProtos.ContainerCommandRequestProto.newBuilder();
     request.setDatanodeUuid(pipeline.getFirstNode().getUuidString());
@@ -461,11 +455,8 @@ public class TestContainerStateMachineFailures {
     // close container transaction will fail over Ratis and will initiate
     // a pipeline close action
 
-    try {
-      assertThrows(IOException.class, () -> xceiverClient.sendCommand(request.build()));
-    } finally {
-      xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    assertThrows(IOException.class, () -> containerClient.closeContainer(containerID));
+
     // Make sure the container is marked unhealthy
     assertSame(dn.getDatanodeStateMachine()
         .getContainer().getContainerSet().getContainer(containerID)
@@ -534,8 +525,7 @@ public class TestContainerStateMachineFailures {
     long containerID = omKeyLocationInfo.getContainerID();
     Pipeline pipeline = cluster.getStorageContainerLocationClient()
         .getContainerWithPipeline(containerID).getPipeline();
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     ContainerProtos.ContainerCommandRequestProto.Builder request =
         ContainerProtos.ContainerCommandRequestProto.newBuilder();
     request.setDatanodeUuid(pipeline.getFirstNode().getUuidString());
@@ -543,7 +533,7 @@ public class TestContainerStateMachineFailures {
     request.setContainerID(containerID);
     request.setCloseContainer(
         ContainerProtos.CloseContainerRequestProto.getDefaultInstance());
-    xceiverClient.sendCommand(request.build());
+    containerClient.closeContainer(containerID);
     assertSame(
         TestHelper.getDatanodeService(omKeyLocationInfo, cluster)
             .getDatanodeStateMachine()
@@ -551,11 +541,8 @@ public class TestContainerStateMachineFailures {
             .getContainerState(),
         ContainerProtos.ContainerDataProto.State.CLOSED);
     assertTrue(stateMachine.isStateMachineHealthy());
-    try {
-      stateMachine.takeSnapshot();
-    } finally {
-      xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    stateMachine.takeSnapshot();
+
     // This is just an attempt to wait for an asynchronous call from Ratis API
     // to updateIncreasingly to finish as part of flaky test issue "HDDS-6115"
     // This doesn't solve the problem completely but reduce the failure ratio.
@@ -621,10 +608,8 @@ public class TestContainerStateMachineFailures {
     long containerID = omKeyLocationInfo.getContainerID();
     Pipeline pipeline = cluster.getStorageContainerLocationClient()
         .getContainerWithPipeline(containerID).getPipeline();
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     CountDownLatch latch = new CountDownLatch(100);
-    int count = 0;
     AtomicInteger failCount = new AtomicInteger(0);
     Runnable r1 = () -> {
       try {
@@ -636,7 +621,7 @@ public class TestContainerStateMachineFailures {
         request.setCloseContainer(
             ContainerProtos.CloseContainerRequestProto.
                 getDefaultInstance());
-        xceiverClient.sendCommand(request.build());
+        containerClient.closeContainer(containerID);
       } catch (IOException e) {
         failCount.incrementAndGet();
       }
@@ -649,7 +634,7 @@ public class TestContainerStateMachineFailures {
                 omKeyLocationInfo.getBlockID(), data.size());
         writeChunkRequest.setWriteChunk(writeChunkRequest.getWriteChunkBuilder()
             .setData(data));
-        xceiverClient.sendCommand(writeChunkRequest.build());
+        containerClient.writeChunk();
         latch.countDown();
       } catch (IOException e) {
         latch.countDown();
@@ -663,45 +648,38 @@ public class TestContainerStateMachineFailures {
       }
     };
 
-    try {
-      List<Thread> threadList = new ArrayList<>();
+    List<Thread> threadList = new ArrayList<>();
 
-      for (int i = 0; i < 100; i++) {
-        count++;
-        Thread r = new Thread(r2);
-        r.start();
-        threadList.add(r);
-      }
-
-      Thread closeContainerThread = new Thread(r1);
-      closeContainerThread.start();
-      threadList.add(closeContainerThread);
-      latch.await(600, TimeUnit.SECONDS);
-      for (int i = 0; i < 101; i++) {
-        threadList.get(i).join();
-      }
-
-      if (failCount.get() > 0) {
-        fail(
-            "testWriteStateMachineDataIdempotencyWithClosedContainer " +
-                "failed");
-      }
-      assertSame(
-          TestHelper.getDatanodeService(omKeyLocationInfo, cluster)
-              .getDatanodeStateMachine()
-              .getContainer().getContainerSet().getContainer(containerID)
-              .getContainerState(),
-          ContainerProtos.ContainerDataProto.State.CLOSED);
-      assertTrue(stateMachine.isStateMachineHealthy());
-      stateMachine.takeSnapshot();
-
-      final FileInfo latestSnapshot = getSnapshotFileInfo(storage);
-      assertNotEquals(snapshot.getPath(), latestSnapshot.getPath());
-
-      r2.run();
-    } finally {
-      xceiverClientManager.releaseClient(xceiverClient, false);
+    for (int i = 0; i < 100; i++) {
+      Thread r = new Thread(r2);
+      r.start();
+      threadList.add(r);
     }
+
+    Thread closeContainerThread = new Thread(r1);
+    closeContainerThread.start();
+    threadList.add(closeContainerThread);
+    latch.await(600, TimeUnit.SECONDS);
+    for (int i = 0; i < 101; i++) {
+      threadList.get(i).join();
+    }
+
+    if (failCount.get() > 0) {
+      fail("testWriteStateMachineDataIdempotencyWithClosedContainer failed");
+    }
+    assertSame(
+        TestHelper.getDatanodeService(omKeyLocationInfo, cluster)
+            .getDatanodeStateMachine()
+            .getContainer().getContainerSet().getContainer(containerID)
+            .getContainerState(),
+        ContainerProtos.ContainerDataProto.State.CLOSED);
+    assertTrue(stateMachine.isStateMachineHealthy());
+    stateMachine.takeSnapshot();
+
+    final FileInfo latestSnapshot = getSnapshotFileInfo(storage);
+    assertNotEquals(snapshot.getPath(), latestSnapshot.getPath());
+
+    r2.run();
   }
 
   @Test

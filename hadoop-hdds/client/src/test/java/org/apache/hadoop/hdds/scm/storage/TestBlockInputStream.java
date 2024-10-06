@@ -23,12 +23,11 @@ import org.apache.commons.lang3.RandomUtils;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.client.ContainerBlockID;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
@@ -91,7 +90,7 @@ public class TestBlockInputStream {
 
   private Function<BlockID, BlockLocationInfo> refreshFunction;
 
-  private OzoneConfiguration conf = new OzoneConfiguration();
+  private final OzoneConfiguration conf = new OzoneConfiguration();
 
   @BeforeEach
   @SuppressWarnings("unchecked")
@@ -195,7 +194,7 @@ public class TestBlockInputStream {
 
     // Seek to random positions between 0 and the block size.
     for (int i = 0; i < 10; i++) {
-      pos = RandomUtils.nextInt(0, blockSize);
+      pos = RandomUtils.secure().randomInt(0, blockSize);
       seekAndVerify(pos);
     }
   }
@@ -406,53 +405,43 @@ public class TestBlockInputStream {
     BlockID blockID = new BlockID(new ContainerBlockID(1, 1));
     Pipeline pipeline = MockPipeline.createSingleNodePipeline();
     Pipeline newPipeline = MockPipeline.createSingleNodePipeline();
-    XceiverClientFactory clientFactory = mock(XceiverClientFactory.class);
-    XceiverClientSpi client = mock(XceiverClientSpi.class);
+    ContainerApiManager clientFactory = mock(ContainerApiManager.class);
+    ContainerApi client = mock(ContainerApi.class);
     BlockLocationInfo blockLocationInfo = mock(BlockLocationInfo.class);
-    when(clientFactory.acquireClientForReadData(pipeline))
+    when(clientFactory.acquireClient(pipeline))
         .thenReturn(client);
 
     final int len = 200;
-    final ChunkInputStream stream = throwingChunkInputStream(ex, len, true);
+    try (ChunkInputStream stream = throwingChunkInputStream(ex, len, true)) {
 
-    when(refreshFunction.apply(blockID))
-        .thenReturn(blockLocationInfo);
-    when(blockLocationInfo.getPipeline()).thenReturn(newPipeline);
+      when(refreshFunction.apply(blockID))
+          .thenReturn(blockLocationInfo);
+      when(blockLocationInfo.getPipeline()).thenReturn(newPipeline);
 
-    OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
-    clientConfig.setChecksumVerify(false);
-    BlockInputStream subject = new BlockInputStream(
-        new BlockLocationInfo(new BlockLocationInfo.Builder().setBlockID(blockID).setLength(blockSize)),
-        pipeline, null, clientFactory, refreshFunction,
-        clientConfig) {
-      @Override
-      protected ChunkInputStream createChunkInputStream(ChunkInfo chunkInfo) {
-        return stream;
+      OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
+      clientConfig.setChecksumVerify(false);
+
+      try (BlockInputStream subject = new BlockInputStream(
+          new BlockLocationInfo(new BlockLocationInfo.Builder().setBlockID(blockID).setLength(blockSize)),
+          pipeline, null, clientFactory, refreshFunction,
+          clientConfig) {
+        @Override
+        protected ChunkInputStream createChunkInputStream(ChunkInfo chunkInfo) {
+          return stream;
+        }
+      }) {
+        subject.initialize();
+        subject.unbuffer();
+
+        // WHEN
+        byte[] b = new byte[len];
+        int bytesRead = subject.read(b, 0, len);
+
+        // THEN
+        assertEquals(len, bytesRead);
+        verify(refreshFunction).apply(blockID);
+        verify(clientFactory).acquireClient(pipeline);
       }
-
-      @Override
-      protected ContainerProtos.BlockData getBlockDataUsingClient() throws IOException {
-        BlockID blockID = getBlockID();
-        ContainerProtos.DatanodeBlockID datanodeBlockID = blockID.getDatanodeBlockIDProtobuf();
-        return ContainerProtos.BlockData.newBuilder().addAllChunks(chunks).setBlockID(datanodeBlockID).build();
-      }
-    };
-
-    try {
-      subject.initialize();
-      subject.unbuffer();
-
-      // WHEN
-      byte[] b = new byte[len];
-      int bytesRead = subject.read(b, 0, len);
-
-      // THEN
-      assertEquals(len, bytesRead);
-      verify(refreshFunction).apply(blockID);
-      verify(clientFactory).acquireClientForReadData(pipeline);
-      verify(clientFactory).releaseClientForReadData(client, false);
-    } finally {
-      subject.close();
     }
   }
 

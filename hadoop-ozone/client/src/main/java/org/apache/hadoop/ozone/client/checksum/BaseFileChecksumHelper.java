@@ -22,7 +22,7 @@ import org.apache.hadoop.fs.MD5MD5CRC32CastagnoliFileChecksum;
 import org.apache.hadoop.fs.MD5MD5CRC32GzipFileChecksum;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.io.DataOutputBuffer;
 import org.apache.hadoop.io.MD5Hash;
 import org.apache.hadoop.ozone.client.OzoneBucket;
@@ -58,7 +58,7 @@ public abstract class BaseFileChecksumHelper {
   private ContainerProtos.ChecksumType checksumType;
 
   private final DataOutputBuffer blockChecksumBuf = new DataOutputBuffer();
-  private XceiverClientFactory xceiverClientFactory;
+  private ContainerApiManager containerApiManager;
   private FileChecksum fileChecksum;
   private List<OmKeyLocationInfo> keyLocationInfos;
   private long remaining = 0L;
@@ -78,8 +78,7 @@ public abstract class BaseFileChecksumHelper {
     this.length = length;
     this.combineMode = checksumCombineMode;
     this.rpcClient = rpcClient;
-    this.xceiverClientFactory =
-        ((RpcClient)rpcClient).getXceiverClientManager();
+    this.containerApiManager = ((RpcClient)rpcClient).getContainerApiManager();
     if (this.length > 0) {
       fetchBlocks();
     }
@@ -114,8 +113,8 @@ public abstract class BaseFileChecksumHelper {
     return checksumType;
   }
 
-  protected XceiverClientFactory getXceiverClientFactory() {
-    return xceiverClientFactory;
+  protected ContainerApiManager getContainerApiManager() {
+    return containerApiManager;
   }
 
   protected DataOutputBuffer getBlockChecksumBuf() {

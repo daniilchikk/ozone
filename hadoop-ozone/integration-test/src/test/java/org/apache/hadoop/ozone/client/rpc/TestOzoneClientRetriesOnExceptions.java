@@ -16,12 +16,6 @@
  */
 package org.apache.hadoop.ozone.client.rpc;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
-
 import org.apache.hadoop.hdds.client.ReplicationFactor;
 import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
@@ -29,9 +23,10 @@ import org.apache.hadoop.hdds.conf.StorageUnit;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerNotOpenException;
@@ -50,18 +45,24 @@ import org.apache.hadoop.ozone.client.io.KeyOutputStream;
 import org.apache.hadoop.ozone.client.io.OzoneOutputStream;
 import org.apache.hadoop.ozone.container.ContainerTestHelper;
 import org.apache.hadoop.ozone.container.TestHelper;
-
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.apache.ratis.protocol.exceptions.GroupMismatchException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests failure detection and handling in BlockOutputStream Class.
@@ -72,17 +73,15 @@ public class TestOzoneClientRetriesOnExceptions {
   private static final int MAX_RETRIES = 3;
 
   private MiniOzoneCluster cluster;
-  private OzoneConfiguration conf = new OzoneConfiguration();
+  private final OzoneConfiguration conf = new OzoneConfiguration();
   private OzoneClient client;
   private ObjectStore objectStore;
-  private int chunkSize;
-  private int flushSize;
   private int maxFlushSize;
   private int blockSize;
   private String volumeName;
   private String bucketName;
   private String keyString;
-  private XceiverClientManager xceiverClientManager;
+  private ContainerApiManager containerApiManager;
 
   /**
    * Create a MiniDFSCluster for testing.
@@ -93,8 +92,8 @@ public class TestOzoneClientRetriesOnExceptions {
    */
   @BeforeEach
   public void init() throws Exception {
-    chunkSize = 100;
-    flushSize = 2 * chunkSize;
+    int chunkSize = 100;
+    int flushSize = 2 * chunkSize;
     maxFlushSize = 2 * flushSize;
     blockSize = 2 * maxFlushSize;
 
@@ -125,7 +124,7 @@ public class TestOzoneClientRetriesOnExceptions {
     //the easiest way to create an open container is creating a key
     client = OzoneClientFactory.getRpcClient(conf);
     objectStore = client.getObjectStore();
-    xceiverClientManager = new XceiverClientManager(conf);
+    containerApiManager = new ContainerApiManagerImpl();
     keyString = UUID.randomUUID().toString();
     volumeName = "testblockoutputstreamwithretries";
     bucketName = volumeName;
@@ -170,11 +169,9 @@ public class TestOzoneClientRetriesOnExceptions {
     Pipeline pipeline =
         cluster.getStorageContainerManager().getPipelineManager()
             .getPipeline(container.getPipelineID());
-    XceiverClientSpi xceiverClient =
-        xceiverClientManager.acquireClient(pipeline);
-    xceiverClient.sendCommand(ContainerTestHelper
-        .getCreateContainerRequest(containerID, pipeline));
-    xceiverClientManager.releaseClient(xceiverClient, false);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+    containerClient.createContainer(containerID);
+
     key.write(data1);
     OutputStream stream = keyOutputStream.getStreamEntries().get(0)
         .getOutputStream();
@@ -195,7 +192,7 @@ public class TestOzoneClientRetriesOnExceptions {
   void testMaxRetriesByOzoneClient() throws Exception {
     String keyName = getKeyName();
     try (OzoneOutputStream key = createKey(
-        keyName, ReplicationType.RATIS, (MAX_RETRIES + 1) * blockSize)) {
+        keyName, ReplicationType.RATIS, (long) (MAX_RETRIES + 1) * blockSize)) {
       KeyOutputStream keyOutputStream =
           assertInstanceOf(KeyOutputStream.class, key.getOutputStream());
       List<BlockOutputStreamEntry> entries = keyOutputStream.getStreamEntries();
@@ -216,13 +213,10 @@ public class TestOzoneClientRetriesOnExceptions {
         Pipeline pipeline =
             cluster.getStorageContainerManager().getPipelineManager()
                 .getPipeline(container.getPipelineID());
-        XceiverClientSpi xceiverClient =
-            xceiverClientManager.acquireClient(pipeline);
-        assertThat(containerList.contains(containerID));
+        ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+        assertThat(containerList).contains(containerID);
         containerList.add(containerID);
-        xceiverClient.sendCommand(ContainerTestHelper
-            .getCreateContainerRequest(containerID, pipeline));
-        xceiverClientManager.releaseClient(xceiverClient, false);
+        containerClient.createContainer(containerID);
       }
       key.write(data1);
       OutputStream stream = entries.get(0).getOutputStream();
@@ -246,13 +240,12 @@ public class TestOzoneClientRetriesOnExceptions {
               "retries get failed due to exceeded maximum " +
               "allowed retries number: " + MAX_RETRIES);
 
-      ioe = assertThrows(IOException.class, () -> key.flush());
+      ioe = assertThrows(IOException.class, key::flush);
       assertThat(ioe.getMessage()).contains("Stream is closed");
     }
   }
 
-  private OzoneOutputStream createKey(String keyName, ReplicationType type,
-                                      long size) throws Exception {
+  private OzoneOutputStream createKey(String keyName, ReplicationType type, long size) throws Exception {
     return TestHelper
         .createKey(keyName, type, ReplicationFactor.ONE,
             size, objectStore, volumeName, bucketName);

@@ -25,7 +25,7 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
@@ -57,16 +57,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public class TestECBlockInputStream {
 
-  private static final int ONEMB = 1024 * 1024;
+  private static final int ONE_MB = 1024 * 1024;
 
   private ECReplicationConfig repConfig;
   private TestBlockInputStreamFactory streamFactory;
-  private OzoneConfiguration conf = new OzoneConfiguration();
+  private final OzoneConfiguration conf = new OzoneConfiguration();
 
   @BeforeEach
   public void setup() {
     repConfig = new ECReplicationConfig(3, 2,
-        ECReplicationConfig.EcCodec.RS, ONEMB);
+        ECReplicationConfig.EcCodec.RS, ONE_MB);
     streamFactory = new TestBlockInputStreamFactory();
   }
 
@@ -74,7 +74,7 @@ public class TestECBlockInputStream {
   public void testSufficientLocations() {
     // EC-3-2, 5MB block, so all 3 data locations are needed
     BlockLocationInfo keyInfo = ECStreamTestUtil
-        .createKeyInfo(repConfig, 5, 5 * ONEMB);
+        .createKeyInfo(repConfig, 5, 5 * ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -84,7 +84,7 @@ public class TestECBlockInputStream {
     }
 
     // EC-3-2, very large block, so all 3 data locations are needed
-    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5, 5000 * ONEMB);
+    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5, 5000L * ONE_MB);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
         keyInfo, null, null, new TestBlockInputStreamFactory(),
         clientConfig)) {
@@ -95,7 +95,7 @@ public class TestECBlockInputStream {
 
     // EC-3-2, 1 byte short of 1MB with 1 location
     dnMap.put(MockDatanodeDetails.randomDatanodeDetails(), 1);
-    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, ONEMB - 1, dnMap);
+    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, ONE_MB - 1, dnMap);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
         keyInfo, null, null, new TestBlockInputStreamFactory(),
         clientConfig)) {
@@ -106,7 +106,7 @@ public class TestECBlockInputStream {
     // locations.
     dnMap.clear();
     dnMap.put(MockDatanodeDetails.randomDatanodeDetails(), 1);
-    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5 * ONEMB, dnMap);
+    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5 * ONE_MB, dnMap);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
         keyInfo, null, null, new TestBlockInputStreamFactory(),
         clientConfig)) {
@@ -119,7 +119,7 @@ public class TestECBlockInputStream {
     dnMap.put(MockDatanodeDetails.randomDatanodeDetails(), 1);
     dnMap.put(MockDatanodeDetails.randomDatanodeDetails(), 4);
     dnMap.put(MockDatanodeDetails.randomDatanodeDetails(), 5);
-    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5 * ONEMB, dnMap);
+    keyInfo = ECStreamTestUtil.createKeyInfo(repConfig, 5 * ONE_MB, dnMap);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
         keyInfo, null, null, new TestBlockInputStreamFactory(),
         clientConfig)) {
@@ -130,9 +130,9 @@ public class TestECBlockInputStream {
   @Test
   public void testCorrectBlockSizePassedToBlockStreamLessThanCell()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONEMB - 100);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONE_MB - 100);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -140,19 +140,19 @@ public class TestECBlockInputStream {
         keyInfo, null, null, streamFactory,
         clientConfig)) {
       ecb.read(buf);
-      // We expect only 1 block stream and it should have a length passed of
-      // ONEMB - 100.
+      // We expect only 1 block stream, and it should have a length passed of
+      // ONE_MB - 100.
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(ONEMB - 100, streams.get(0).getLength());
+      assertEquals(ONE_MB - 100, streams.get(0).getLength());
     }
   }
 
   @Test
   public void testCorrectBlockSizePassedToBlockStreamTwoCells()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONEMB + 100);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONE_MB + 100);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -161,7 +161,7 @@ public class TestECBlockInputStream {
         clientConfig)) {
       ecb.read(buf);
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(ONEMB, streams.get(0).getLength());
+      assertEquals(ONE_MB, streams.get(0).getLength());
       assertEquals(100, streams.get(1).getLength());
     }
   }
@@ -169,9 +169,9 @@ public class TestECBlockInputStream {
   @Test
   public void testCorrectBlockSizePassedToBlockStreamThreeCells()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 2 * ONEMB + 100);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 2 * ONE_MB + 100);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -180,8 +180,8 @@ public class TestECBlockInputStream {
         clientConfig)) {
       ecb.read(buf);
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(ONEMB, streams.get(0).getLength());
-      assertEquals(ONEMB, streams.get(1).getLength());
+      assertEquals(ONE_MB, streams.get(0).getLength());
+      assertEquals(ONE_MB, streams.get(1).getLength());
       assertEquals(100, streams.get(2).getLength());
     }
   }
@@ -189,9 +189,9 @@ public class TestECBlockInputStream {
   @Test
   public void testCorrectBlockSizePassedToBlockStreamThreeFullAndPartialStripe()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 10 * ONEMB + 100);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 10 * ONE_MB + 100);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -200,18 +200,18 @@ public class TestECBlockInputStream {
         clientConfig)) {
       ecb.read(buf);
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(4 * ONEMB, streams.get(0).getLength());
-      assertEquals(3 * ONEMB + 100, streams.get(1).getLength());
-      assertEquals(3 * ONEMB, streams.get(2).getLength());
+      assertEquals(4 * ONE_MB, streams.get(0).getLength());
+      assertEquals(3 * ONE_MB + 100, streams.get(1).getLength());
+      assertEquals(3 * ONE_MB, streams.get(2).getLength());
     }
   }
 
   @Test
   public void testCorrectBlockSizePassedToBlockStreamSingleFullCell()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, ONE_MB);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -220,16 +220,16 @@ public class TestECBlockInputStream {
         clientConfig)) {
       ecb.read(buf);
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(ONEMB, streams.get(0).getLength());
+      assertEquals(ONE_MB, streams.get(0).getLength());
     }
   }
 
   @Test
   public void testCorrectBlockSizePassedToBlockStreamSeveralFullCells()
       throws IOException {
-    ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+    ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 9 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 9 * ONE_MB);
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
@@ -238,16 +238,16 @@ public class TestECBlockInputStream {
         clientConfig)) {
       ecb.read(buf);
       List<TestBlockInputStream> streams = streamFactory.getBlockStreams();
-      assertEquals(3 * ONEMB, streams.get(0).getLength());
-      assertEquals(3 * ONEMB, streams.get(1).getLength());
-      assertEquals(3 * ONEMB, streams.get(2).getLength());
+      assertEquals(3 * ONE_MB, streams.get(0).getLength());
+      assertEquals(3 * ONE_MB, streams.get(1).getLength());
+      assertEquals(3 * ONE_MB, streams.get(2).getLength());
     }
   }
 
   @Test
   public void testSimpleRead() throws IOException {
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -273,7 +273,7 @@ public class TestECBlockInputStream {
   @Test
   public void testSimpleReadUnderOneChunk() throws IOException {
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 1, ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 1, ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -317,7 +317,7 @@ public class TestECBlockInputStream {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
         100);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -351,9 +351,9 @@ public class TestECBlockInputStream {
   }
 
   @Test
-  public void testSeekPastBlockLength() throws IOException {
+  public void testSeekPastBlockLength() {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
         ECStreamTestUtil.createKeyInfo(repConfig, 5, 100);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
@@ -366,9 +366,9 @@ public class TestECBlockInputStream {
   }
 
   @Test
-  public void testSeekToLength() throws IOException {
+  public void testSeekToLength() {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
         ECStreamTestUtil.createKeyInfo(repConfig, 5, 100);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
@@ -384,7 +384,7 @@ public class TestECBlockInputStream {
   @Test
   public void testSeekToLengthZeroLengthBlock() throws IOException {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
         ECStreamTestUtil.createKeyInfo(repConfig, 5, 0);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
@@ -401,28 +401,28 @@ public class TestECBlockInputStream {
   @Test
   public void testSeekToValidPosition() throws IOException {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
         keyInfo, null, null, streamFactory,
         clientConfig)) {
-      ecb.seek(ONEMB - 1);
-      assertEquals(ONEMB - 1, ecb.getPos());
-      assertEquals(ONEMB * 4 + 1, ecb.getRemaining());
+      ecb.seek(ONE_MB - 1);
+      assertEquals(ONE_MB - 1, ecb.getPos());
+      assertEquals(ONE_MB * 4 + 1, ecb.getRemaining());
       // First read should read the last byte of the first chunk
       assertEquals(0, ecb.read());
-      assertEquals(ONEMB,
+      assertEquals(ONE_MB,
           streamFactory.getBlockStreams().get(0).position);
       // Second read should be the first byte of the second chunk.
       assertEquals(1, ecb.read());
 
       // Seek to the end of the file minus one byte
-      ecb.seek(ONEMB * 5 - 1);
+      ecb.seek(ONE_MB * 5 - 1);
       assertEquals(1, ecb.read());
-      assertEquals(ONEMB * 2,
+      assertEquals(ONE_MB * 2,
           streamFactory.getBlockStreams().get(1).position);
       // Second read should be EOF as there is no data left
       assertEquals(-1, ecb.read());
@@ -433,9 +433,9 @@ public class TestECBlockInputStream {
   @Test
   public void testErrorReadingBlockReportsBadLocation() throws IOException {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONE_MB);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -443,9 +443,9 @@ public class TestECBlockInputStream {
         clientConfig)) {
       // Read a full stripe to ensure all streams are created in the stream
       // factory
-      ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+      ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
       int read = ecb.read(buf);
-      assertEquals(3 * ONEMB, read);
+      assertEquals(3 * ONE_MB, read);
       // Now make replication index 2 error on the next read
       streamFactory.getBlockStreams().get(1).setThrowException(true);
       buf.clear();
@@ -460,7 +460,7 @@ public class TestECBlockInputStream {
   @Test
   public void testNoErrorIfSpareLocationToRead() throws IOException {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     Map<DatanodeDetails, Integer> datanodes = new LinkedHashMap<>();
     for (int i = 1; i <= repConfig.getRequiredNodes(); i++) {
       datanodes.put(MockDatanodeDetails.randomDatanodeDetails(), i);
@@ -469,7 +469,7 @@ public class TestECBlockInputStream {
     datanodes.put(MockDatanodeDetails.randomDatanodeDetails(), 1);
 
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 8 * ONEMB, datanodes);
+        ECStreamTestUtil.createKeyInfo(repConfig, 8 * ONE_MB, datanodes);
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(true);
     try (ECBlockInputStream ecb = new ECBlockInputStream(repConfig,
@@ -477,15 +477,15 @@ public class TestECBlockInputStream {
         clientConfig)) {
       // Read a full stripe to ensure all streams are created in the stream
       // factory
-      ByteBuffer buf = ByteBuffer.allocate(3 * ONEMB);
+      ByteBuffer buf = ByteBuffer.allocate(3 * ONE_MB);
       int read = ecb.read(buf);
-      assertEquals(3 * ONEMB, read);
+      assertEquals(3 * ONE_MB, read);
       // Now make replication index 1 error on the next read but as there is a
       // spare it should read from it with no errors
       streamFactory.getBlockStreams().get(0).setThrowException(true);
       buf.clear();
       read = ecb.read(buf);
-      assertEquals(3 * ONEMB, read);
+      assertEquals(3 * ONE_MB, read);
 
       // Now make the spare one error on the next read, and we should get an
       // error with two failed locations. As each stream is created, a new
@@ -512,9 +512,9 @@ public class TestECBlockInputStream {
   @Test
   public void testEcPipelineRefreshFunction() {
     repConfig = new ECReplicationConfig(3, 2, ECReplicationConfig.EcCodec.RS,
-        ONEMB);
+        ONE_MB);
     BlockLocationInfo keyInfo =
-        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONEMB);
+        ECStreamTestUtil.createKeyInfo(repConfig, 5, 5 * ONE_MB);
 
     BlockID blockID = new BlockID(1, 1);
     Map<DatanodeDetails, Integer> dnMap = new HashMap<>();
@@ -531,10 +531,9 @@ public class TestECBlockInputStream {
           .setState(Pipeline.PipelineState.CLOSED)
           .setId(PipelineID.randomId())
           .build();
-      BlockLocationInfo blockLocation = new BlockLocationInfo.Builder()
+      return new BlockLocationInfo.Builder()
           .setPipeline(pipeline)
           .build();
-      return blockLocation;
     };
 
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
@@ -565,16 +564,17 @@ public class TestECBlockInputStream {
   private static class TestBlockInputStreamFactory implements
       BlockInputStreamFactory {
 
-    private List<TestBlockInputStream> blockStreams = new ArrayList<>();
+    private final List<TestBlockInputStream> blockStreams = new ArrayList<>();
 
     public synchronized List<TestBlockInputStream> getBlockStreams() {
       return blockStreams;
     }
 
+    @Override
     public synchronized BlockExtendedInputStream create(
         ReplicationConfig repConfig, BlockLocationInfo blockInfo,
         Pipeline pipeline, Token<OzoneBlockTokenIdentifier> token,
-        XceiverClientFactory xceiverFactory,
+        ContainerApiManager containerApiManager,
         Function<BlockID, BlockLocationInfo> refreshFunction,
         OzoneClientConfig config) {
       TestBlockInputStream stream = new TestBlockInputStream(
@@ -589,9 +589,9 @@ public class TestECBlockInputStream {
 
     private long position = 0;
     private boolean closed = false;
-    private byte dataVal = 1;
-    private BlockID blockID;
-    private long length;
+    private final byte dataVal;
+    private final BlockID blockID;
+    private final long length;
     private boolean throwException = false;
     private static final byte EOF = -1;
 
@@ -642,7 +642,7 @@ public class TestECBlockInputStream {
       }
       position += toRead;
       return toRead;
-    };
+    }
 
     @Override
     protected int readWithStrategy(ByteReaderStrategy strategy) throws

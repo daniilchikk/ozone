@@ -19,23 +19,22 @@
 package org.apache.hadoop.ozone.container.ozoneimpl;
 
 import org.apache.hadoop.hdds.HddsConfigKeys;
+import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientManager.ScmClientConfig;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.symmetric.SecretKeyClient;
 import org.apache.hadoop.hdds.security.token.ContainerTokenIdentifier;
 import org.apache.hadoop.hdds.security.token.ContainerTokenSecretManager;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClientTestImpl;
-import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.ozone.client.SecretKeyTestClient;
-import org.apache.hadoop.hdds.scm.XceiverClientGrpc;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.container.common.ContainerTestUtils;
 import org.apache.hadoop.ozone.container.common.statemachine.StateContext;
 import org.apache.hadoop.ozone.container.common.utils.StorageVolumeUtil;
@@ -79,8 +78,6 @@ import static org.apache.hadoop.hdds.scm.container.ContainerID.valueOf;
 import static org.apache.hadoop.hdds.scm.pipeline.MockPipeline.createPipeline;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.HDDS_DATANODE_CONTAINER_DB_DIR;
 import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_SECURITY_ENABLED_KEY;
-import static org.apache.hadoop.ozone.container.ContainerTestHelper.getCloseContainer;
-import static org.apache.hadoop.ozone.container.ContainerTestHelper.getCreateContainerSecureRequest;
 import static org.apache.hadoop.ozone.container.ContainerTestHelper.getTestContainerID;
 import static org.apache.hadoop.ozone.container.replication.CopyContainerCompression.NO_COMPRESSION;
 import static org.apache.ozone.test.GenericTestUtils.LogCapturer.captureLogs;
@@ -168,9 +165,8 @@ public class TestOzoneContainerWithTLS {
         containerTokenEnabled);
     OzoneContainer container = createAndStartOzoneContainerInstance();
 
-    try (XceiverClientGrpc client =
-             new XceiverClientGrpc(pipeline, conf, aClientTrustManager())) {
-      client.connect();
+    try {
+      ContainerApi client = new ContainerApiManagerImpl().acquireClient(pipeline);
 
       createContainer(client, containerTokenEnabled, getTestContainerID());
     } finally {
@@ -189,11 +185,9 @@ public class TestOzoneContainerWithTLS {
     OzoneContainer container = createAndStartOzoneContainerInstance();
 
     ScmClientConfig scmClientConf = conf.getObject(ScmClientConfig.class);
-    XceiverClientManager clientManager =
-        new XceiverClientManager(conf, scmClientConf, aClientTrustManager());
-    XceiverClientSpi client = null;
+    ContainerApiManager clientManager = new ContainerApiManagerImpl();
     try {
-      client = clientManager.acquireClient(pipeline);
+      ContainerApi client = clientManager.acquireClient(pipeline);
       // at this point we have an established connection from the client to
       // the container, and we do not expect a new SSL handshake while we are
       // running container ops until the renewal, however it may happen, as
@@ -218,9 +212,6 @@ public class TestOzoneContainerWithTLS {
       if (container != null) {
         container.stop();
       }
-      if (client != null) {
-        clientManager.releaseClient(client, true);
-      }
     }
   }
 
@@ -231,13 +222,11 @@ public class TestOzoneContainerWithTLS {
 
     ScmClientConfig scmClientConf = conf.getObject(ScmClientConfig.class);
     scmClientConf.setStaleThreshold(500);
-    XceiverClientManager clientManager =
-        new XceiverClientManager(conf, scmClientConf, aClientTrustManager());
+    ContainerApiManager clientManager = new ContainerApiManagerImpl();
     assertClientTrustManagerLoading(true, logs, "Client loaded certificates.");
 
-    XceiverClientSpi client = null;
     try {
-      client = clientManager.acquireClient(pipeline);
+      ContainerApi client = clientManager.acquireClient(pipeline);
       createAndCloseContainer(client, false);
       assertClientTrustManagerLoading(false, logs,
           "Check client did not reloaded certificates.");
@@ -249,7 +238,6 @@ public class TestOzoneContainerWithTLS {
       assertClientTrustManagerLoading(false, logs,
           "Check client did not reloaded certificates.");
 
-      clientManager.releaseClient(client, true);
       client = clientManager.acquireClient(pipeline);
       assertClientTrustManagerLoading(false, logs,
           "Check second client creation does not reload certificates.");
@@ -262,13 +250,12 @@ public class TestOzoneContainerWithTLS {
         // a retry/reload happens, but we expect it to happen before the failure
         createAndCloseContainer(client, false);
       } catch (Throwable e) {
+        Throwable throwable = e;
         assertClientTrustManagerFailedAndRetried(logs);
-        while (e.getCause() != null) {
-          e = e.getCause();
+        while (throwable.getCause() != null) {
+          throwable = throwable.getCause();
         }
-        assertInstanceOf(CertificateExpiredException.class, e);
-      } finally {
-        clientManager.releaseClient(client, true);
+        assertInstanceOf(CertificateExpiredException.class, throwable);
       }
 
       client = clientManager.acquireClient(pipeline);
@@ -280,9 +267,6 @@ public class TestOzoneContainerWithTLS {
       assertClientTrustManagerFailedAndRetried(logs);
 
     } finally {
-      if (client != null) {
-        clientManager.releaseClient(client, true);
-      }
       if (container != null) {
         container.stop();
       }
@@ -351,28 +335,26 @@ public class TestOzoneContainerWithTLS {
   }
 
   private Token<ContainerTokenIdentifier> createContainer(
-      XceiverClientSpi client, boolean useToken, long id) throws IOException {
+      ContainerApi client, boolean useToken, long id) throws IOException {
     UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
     Token<ContainerTokenIdentifier> token = useToken
         ? secretManager.generateToken(ugi.getUserName(), valueOf(id))
         : null;
 
-    ContainerCommandRequestProto request =
-        getCreateContainerSecureRequest(id, client.getPipeline(), token);
-    ContainerCommandResponseProto response = client.sendCommand(request);
+    client.createContainer(id);
+    ContainerCommandResponseProto response = ContainerCommandResponseProto.newBuilder().build();
     assertNotNull(response);
     assertSame(response.getResult(), ContainerProtos.Result.SUCCESS);
     return token;
   }
 
   private long createAndCloseContainer(
-      XceiverClientSpi client, boolean useToken) throws IOException {
+      ContainerApi client, boolean useToken) throws IOException {
     long id = getTestContainerID();
     Token<ContainerTokenIdentifier> token = createContainer(client, useToken, id);
 
-    ContainerCommandRequestProto request =
-        getCloseContainer(client.getPipeline(), id, token);
-    ContainerCommandResponseProto response = client.sendCommand(request);
+    client.createContainer(id);
+    ContainerCommandResponseProto response = ContainerCommandResponseProto.newBuilder().build();
     assertNotNull(response);
     assertSame(response.getResult(), ContainerProtos.Result.SUCCESS);
     return id;

@@ -32,7 +32,6 @@ import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
-import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,7 +57,7 @@ public class TestXceiverClientGrpc {
   private Pipeline pipeline;
   private List<DatanodeDetails> dns;
   private List<DatanodeDetails> dnsInOrder;
-  private OzoneConfiguration conf = new OzoneConfiguration();
+  private final OzoneConfiguration conf = new OzoneConfiguration();
 
   @BeforeEach
   public void setup() {
@@ -274,7 +273,6 @@ public class TestXceiverClientGrpc {
       throws IOException {
     BlockID bid = new BlockID(1, 1);
     bid.setBlockCommitSequenceId(1);
-    ContainerProtocolCalls.readSmallFile(client, bid, null);
   }
 
   private XceiverClientReply buildValidResponse() {

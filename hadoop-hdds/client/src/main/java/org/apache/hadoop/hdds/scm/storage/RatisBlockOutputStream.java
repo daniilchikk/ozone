@@ -25,6 +25,7 @@ import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.StreamBufferArgs;
 import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.common.ChunkBuffer;
 import org.apache.hadoop.security.token.Token;
@@ -73,7 +74,7 @@ public class RatisBlockOutputStream extends BlockOutputStream
   public RatisBlockOutputStream(
       BlockID blockID,
       long blockSize,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       Pipeline pipeline,
       BufferPool bufferPool,
       OzoneClientConfig config,
@@ -81,9 +82,9 @@ public class RatisBlockOutputStream extends BlockOutputStream
       ContainerClientMetrics clientMetrics, StreamBufferArgs streamBufferArgs,
       Supplier<ExecutorService> blockOutputStreamResourceProvider
   ) throws IOException {
-    super(blockID, blockSize, xceiverClientManager, pipeline,
+    super(blockID, blockSize, containerApiManager, pipeline,
         bufferPool, config, token, clientMetrics, streamBufferArgs, blockOutputStreamResourceProvider);
-    this.commitWatcher = new CommitWatcher(bufferPool, getXceiverClient());
+    this.commitWatcher = new CommitWatcher(bufferPool, getContainerClient());
   }
 
   @Override
@@ -94,11 +95,6 @@ public class RatisBlockOutputStream extends BlockOutputStream
   @VisibleForTesting
   public Map<Long, List<ChunkBuffer>> getCommitIndex2flushedDataMap() {
     return commitWatcher.getCommitIndexMap();
-  }
-
-  @Override
-  void releaseBuffersOnException() {
-    commitWatcher.releaseBuffersOnException();
   }
 
   @Override

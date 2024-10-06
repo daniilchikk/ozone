@@ -91,9 +91,8 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
                  createStorageContainerLocationClient(ozoneConf)) {
       Pipeline pipeline = findPipelineForTest(pipelineId, scmClient, LOG);
 
-      try (XceiverClientFactory xceiverClientManager =
-                   new XceiverClientManager(ozoneConf)) {
-        xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
+      try (XceiverClientFactory xceiverClientManager = new XceiverClientManager(ozoneConf)) {
+        xceiverClient = null;
 
         checksumProtobuf = ContainerProtos.ChecksumData.newBuilder()
             .setBytesPerChecksum(4)

@@ -26,10 +26,10 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.security.x509.certificate.client.CertificateClient;
@@ -56,10 +56,10 @@ import java.util.Set;
 public class ECContainerOperationClient implements Closeable {
   private static final Logger LOG =
       LoggerFactory.getLogger(ECContainerOperationClient.class);
-  private final XceiverClientManager xceiverClientManager;
+  private final ContainerApiManager containerApiManager;
 
-  public ECContainerOperationClient(XceiverClientManager clientManager) {
-    this.xceiverClientManager = clientManager;
+  public ECContainerOperationClient(ContainerApiManager containerApiManager) {
+    this.containerApiManager = containerApiManager;
   }
 
   public ECContainerOperationClient(ConfigurationSource conf,
@@ -68,7 +68,7 @@ public class ECContainerOperationClient implements Closeable {
   }
 
   @Nonnull
-  private static XceiverClientManager createClientManager(ConfigurationSource conf, CertificateClient certificateClient)
+  private static ContainerApiManager createClientManager(ConfigurationSource conf, CertificateClient certificateClient)
       throws IOException {
     ClientTrustManager trustManager = null;
     if (OzoneSecurityUtil.isSecurityEnabled(conf)) {
@@ -78,40 +78,32 @@ public class ECContainerOperationClient implements Closeable {
         .setMaxCacheSize(256)
         .setStaleThresholdMs(10 * 1000)
         .build();
-    return new XceiverClientManager(conf, scmClientConfig, trustManager);
+    return new ContainerApiManagerImpl();
   }
 
   public BlockData[] listBlock(long containerId, DatanodeDetails dn, ECReplicationConfig repConfig,
       Token<? extends TokenIdentifier> token) throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(dn, repConfig));
+    ContainerApi containerClient = this.containerApiManager.acquireClient(singleNodePipeline(dn, repConfig));
 
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
-      List<ContainerProtos.BlockData> blockDataList = containerClient
-          .listBlock(containerId, null, Integer.MAX_VALUE)
-          .getBlockDataList();
-      return blockDataList.stream().map(i -> {
-        try {
-          return BlockData.getFromProtoBuf(i);
-        } catch (IOException e) {
-          LOG.debug("Failed while converting to protobuf BlockData. Returning null for listBlock from DN: {}", dn, e);
-          // TODO: revisit here.
-          return null;
-        }
-      }).toArray(BlockData[]::new);
-    } finally {
-      this.xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    List<ContainerProtos.BlockData> blockDataList = containerClient
+        .listBlock(containerId, null, Integer.MAX_VALUE)
+        .getBlockDataList();
+    return blockDataList.stream().map(i -> {
+      try {
+        return BlockData.getFromProtoBuf(i);
+      } catch (IOException e) {
+        LOG.debug("Failed while converting to protobuf BlockData. Returning null for listBlock from DN: {}", dn, e);
+        // TODO: revisit here.
+        return null;
+      }
+    }).toArray(BlockData[]::new);
   }
 
   public void closeContainer(long containerID, DatanodeDetails dn,
       ECReplicationConfig repConfig, @Nullable Token<? extends TokenIdentifier> token) throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager
+    ContainerApi containerClient = this.containerApiManager
         .acquireClient(singleNodePipeline(dn, repConfig));
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
-      containerClient.closeContainer(containerID);
-    } finally {
-      this.xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    containerClient.closeContainer(containerID);
   }
 
   /**
@@ -132,33 +124,26 @@ public class ECContainerOperationClient implements Closeable {
   public void deleteContainerInState(long containerID, DatanodeDetails dn,
       ECReplicationConfig repConfig, @Nullable Token<? extends TokenIdentifier> token, Set<State> acceptableStates)
       throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(dn, repConfig));
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
-      // Before deleting the recovering container, just make sure that state is
-      // Recovering & Unhealthy. There will be still race condition,
-      // but this will avoid most usual case.
-      ContainerProtos.ReadContainerResponseProto readContainerResponseProto =
-          containerClient.readContainer(containerID);
-      State currentState = readContainerResponseProto.getContainerData().getState();
-      if (!Objects.isNull(acceptableStates) && acceptableStates.contains(currentState)) {
-        containerClient.deleteContainer(containerID, true);
-      } else {
-        LOG.warn("Container {} will not be deleted as current state not in acceptable states. Current state: {}, " +
-                "Acceptable States: {}", containerID, currentState, acceptableStates);
-      }
-    } finally {
-      this.xceiverClientManager.releaseClient(xceiverClient, false);
+    ContainerApi containerClient = this.containerApiManager.acquireClient(singleNodePipeline(dn, repConfig));
+
+    // Before deleting the recovering container, just make sure that state is
+    // Recovering & Unhealthy. There will be still race condition,
+    // but this will avoid most usual case.
+    ContainerProtos.ReadContainerResponseProto readContainerResponseProto =
+        containerClient.readContainer(containerID);
+    State currentState = readContainerResponseProto.getContainerData().getState();
+    if (!Objects.isNull(acceptableStates) && acceptableStates.contains(currentState)) {
+      containerClient.deleteContainer(containerID, true);
+    } else {
+      LOG.warn("Container {} will not be deleted as current state not in acceptable states. Current state: {}, " +
+              "Acceptable States: {}", containerID, currentState, acceptableStates);
     }
   }
 
   public void createRecoveringContainer(long containerID, DatanodeDetails datanode, ECReplicationConfig repConfig,
       @Nullable Token<? extends TokenIdentifier> token, int replicaIndex) throws IOException {
-    XceiverClientSpi xceiverClient = this.xceiverClientManager.acquireClient(singleNodePipeline(datanode, repConfig));
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
-      containerClient.createRecoveringContainer(containerID, replicaIndex);
-    } finally {
-      this.xceiverClientManager.releaseClient(xceiverClient, false);
-    }
+    ContainerApi containerClient = this.containerApiManager.acquireClient(singleNodePipeline(datanode, repConfig));
+    containerClient.createRecoveringContainer(containerID, replicaIndex);
   }
 
   Pipeline singleNodePipeline(DatanodeDetails dn,
@@ -177,14 +162,14 @@ public class ECContainerOperationClient implements Closeable {
             .setReplicaIndexes(Collections.singletonMap(dn, replicaIndex)).build();
   }
 
-  public XceiverClientManager getXceiverClientManager() {
-    return xceiverClientManager;
+  public ContainerApiManager getContainerApiManager() {
+    return containerApiManager;
   }
 
   @Override
   public void close() throws IOException {
-    if (xceiverClientManager != null) {
-      xceiverClientManager.close();
+    if (containerApiManager != null) {
+      containerApiManager.close();
     }
   }
 }

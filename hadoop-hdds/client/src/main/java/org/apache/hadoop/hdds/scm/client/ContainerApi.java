@@ -21,12 +21,30 @@ package org.apache.hadoop.hdds.scm.client;
 import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.EchoResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.FinalizeBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetCommittedBlockLengthResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ListBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.WriteChunkRequestProto;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.ratis.client.api.DataStreamOutput;
+import org.apache.ratis.proto.RaftProtos;
+import org.apache.ratis.protocol.RoutingTable;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -40,11 +58,15 @@ public interface ContainerApi extends AutoCloseable {
 
   GetCommittedBlockLengthResponseProto getCommittedBlockLength(BlockID blockId) throws IOException;
 
+  PutBlockResponseProto putBlock() throws IOException;
+
   XceiverClientReply putBlockAsync(BlockData containerBlockData, boolean eof) throws IOException, ExecutionException, InterruptedException;
 
   FinalizeBlockResponseProto finalizeBlock(DatanodeBlockID blockId) throws IOException;
 
   ReadChunkResponseProto readChunk(ChunkInfo chunk, DatanodeBlockID blockId) throws IOException;
+
+  WriteChunkRequestProto writeChunk() throws IOException;
 
   XceiverClientReply writeChunkAsync(ChunkInfo chunk, BlockID blockId, ByteString data, int replicationIndex,
       BlockData blockData, boolean close) throws IOException, ExecutionException, InterruptedException;
@@ -59,14 +81,28 @@ public interface ContainerApi extends AutoCloseable {
 
   void createContainer(long containerId, @Nullable ContainerDataProto.State state, int replicaIndex) throws IOException;
 
+  XceiverClientReply createContainerAsync() throws IOException;
+
   void deleteContainer(long containerId, boolean force) throws IOException;
 
   void closeContainer(long containerId) throws IOException;
+
+  XceiverClientReply closeContainerAsync() throws IOException;
 
   ReadContainerResponseProto readContainer(long containerId) throws IOException;
 
   EchoResponseProto echo(long containerId, ByteString payloadReqBytes, int payloadRespSizeKB, int sleepTimeMs,
       boolean readOnly) throws IOException;
+
+  CompletableFuture<XceiverClientReply> watchForCommit(long commitIndex);
+
+  long getReplicatedMinCommitIndex();
+
+  void updateCommitInfosMap(Collection<RaftProtos.CommitInfoProto> commitInfos);
+
+  DataStreamOutput stream(ByteBuffer readOnlyByteBuffer);
+
+  DataStreamOutput stream(ByteBuffer readOnlyByteBuffer, RoutingTable routingTable);
 
   @Override
   void close();

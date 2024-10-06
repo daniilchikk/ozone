@@ -16,25 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.hdds.scm.client.manager;
+package org.apache.hadoop.hdds.scm.client.validator;
 
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerMultinodeApi;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 
-public interface ContainerApiManager extends AutoCloseable {
-  default ContainerApi acquireClient(Pipeline pipeline) {
-    return acquireClient(pipeline, false);
-  }
-
-  ContainerApi acquireClient(Pipeline pipeline, boolean topologyAware);
-
-  default ContainerMultinodeApi acquireMultinodeClient(Pipeline pipeline) {
-    return acquireMultinodeClient(pipeline, false);
-  }
-
-  ContainerMultinodeApi acquireMultinodeClient(Pipeline pipeline, boolean topologyAware);
-
-  @Override
-  void close();
+public interface ContainerResponseValidator {
+  void validate(ContainerCommandResponseProto response) throws StorageContainerException;
 }

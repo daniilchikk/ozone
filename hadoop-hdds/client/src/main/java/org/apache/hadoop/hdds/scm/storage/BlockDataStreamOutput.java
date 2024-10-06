@@ -27,7 +27,8 @@ import org.apache.hadoop.hdds.ratis.ContainerCommandRequestMessage;
 import org.apache.hadoop.hdds.ratis.RatisHelper;
 import org.apache.hadoop.hdds.scm.*;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.validator.ResponseValidatorFactory;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.common.Checksum;
@@ -50,6 +51,8 @@ import java.util.Queue;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.hadoop.hdds.ratis.RatisHelper.getRoutingTable;
 
 /**
  * An {@link ByteBufferStreamOutput} used by the REST service in combination
@@ -75,21 +78,21 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
 
   public static final String EXCEPTION_MSG =
       "Unexpected Storage Container Exception: ";
-  private static final CompletableFuture[] EMPTY_FUTURE_ARRAY = {};
+  private static final CompletableFuture<?>[] EMPTY_FUTURE_ARRAY = {};
 
-  private AtomicReference<BlockID> blockID;
+  private final AtomicReference<BlockID> blockID;
 
   private final BlockData.Builder containerBlockData;
-  private XceiverClientFactory xceiverClientFactory;
-  private XceiverClientRatis xceiverClient;
-  private OzoneClientConfig config;
+  private ContainerApiManager containerApiManager;
+  private ContainerApi containerClient;
+  private final OzoneClientConfig config;
 
   private int chunkIndex;
   private final AtomicLong chunkOffset = new AtomicLong();
 
   // Similar to 'BufferPool' but this list maintains only references
   // to the ByteBuffers.
-  private List<StreamBuffer> bufferList;
+  private final List<StreamBuffer> bufferList;
 
   // The IOException will be set by response handling thread in case there is an
   // exception received in the response. If the exception is set, the next
@@ -108,42 +111,41 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
   // be released from the buffer pool.
   private final StreamCommitWatcher commitWatcher;
 
-  private Queue<CompletableFuture<ContainerCommandResponseProto>>
+  private final Queue<CompletableFuture<ContainerCommandResponseProto>>
       putBlockFutures = new LinkedList<>();
 
   private final List<DatanodeDetails> failedServers;
   private final Checksum checksum;
 
-  //number of buffers used before doing a flush/putBlock.
-  private int flushPeriod;
   private final Token<? extends TokenIdentifier> token;
   private final String tokenString;
   private final DataStreamOutput out;
   private CompletableFuture<DataStreamReply> dataStreamCloseReply;
-  private List<CompletableFuture<DataStreamReply>> futures = new ArrayList<>();
+  private final List<CompletableFuture<DataStreamReply>> futures = new ArrayList<>();
   private static final long SYNC_SIZE = 0; // TODO: disk sync is disabled for now
   private long syncPosition = 0;
   private StreamBuffer currentBuffer;
-  private XceiverClientMetrics metrics;
+  private final XceiverClientMetrics metrics;
   // buffers for which putBlock is yet to be executed
   private List<StreamBuffer> buffersForPutBlock;
-  private boolean isDatastreamPipelineMode;
+  private final boolean isDatastreamPipelineMode;
+  private final Pipeline pipeline;
   /**
    * Creates a new BlockDataStreamOutput.
    *
    * @param blockID              block ID
-   * @param xceiverClientManager client manager that controls client
+   * @param containerApiManager client manager that controls client
    * @param pipeline             pipeline where block will be written
    */
   public BlockDataStreamOutput(
       BlockID blockID,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       Pipeline pipeline,
       OzoneClientConfig config,
       Token<? extends TokenIdentifier> token,
       List<StreamBuffer> bufferList
   ) throws IOException {
-    this.xceiverClientFactory = xceiverClientManager;
+    this.containerApiManager = containerApiManager;
     this.config = config;
     this.isDatastreamPipelineMode = config.isDatastreamPipelineMode();
     this.blockID = new AtomicReference<>(blockID);
@@ -152,15 +154,15 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
     this.containerBlockData =
         BlockData.newBuilder().setBlockID(blockID.getDatanodeBlockIDProtobuf())
             .addMetadata(keyValue);
-    this.xceiverClient =
-        (XceiverClientRatis)xceiverClientManager.acquireClient(pipeline, true);
+    this.containerClient = containerApiManager.acquireClient(pipeline);
     this.token = token;
     this.tokenString = (this.token == null) ? null :
         this.token.encodeToUrlString();
     // Alternatively, stream setup can be delayed till the first chunk write.
     this.out = setupStream(pipeline);
     this.bufferList = bufferList;
-    flushPeriod = (int) (config.getStreamBufferFlushSize() / config
+    //number of buffers used before doing a flush/putBlock.
+    int flushPeriod = (int) (config.getStreamBufferFlushSize() / config
         .getStreamBufferSize());
 
     Preconditions
@@ -170,7 +172,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
 
     // A single thread executor handle the responses of async requests
     responseExecutor = Executors.newSingleThreadExecutor();
-    commitWatcher = new StreamCommitWatcher(xceiverClient, bufferList);
+    commitWatcher = new StreamCommitWatcher(containerClient, bufferList);
     totalDataFlushedLength = 0;
     writtenDataLength = 0;
     failedServers = new ArrayList<>(0);
@@ -178,6 +180,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
     checksum = new Checksum(config.getChecksumType(),
         config.getBytesPerChecksum());
     metrics = XceiverClientManager.getXceiverClientMetrics();
+    this.pipeline = pipeline;
   }
 
   private DataStreamOutput setupStream(Pipeline pipeline) throws IOException {
@@ -204,12 +207,9 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
         ContainerCommandRequestMessage.toMessage(builder.build(), null);
 
     if (isDatastreamPipelineMode) {
-      return Preconditions.checkNotNull(xceiverClient.getDataStreamApi())
-          .stream(message.getContent().asReadOnlyByteBuffer(),
-              RatisHelper.getRoutingTable(pipeline));
+      return Preconditions.checkNotNull(containerClient.stream(message.getContent().asReadOnlyByteBuffer(), getRoutingTable(pipeline)));
     } else {
-      return Preconditions.checkNotNull(xceiverClient.getDataStreamApi())
-          .stream(message.getContent().asReadOnlyByteBuffer());
+      return Preconditions.checkNotNull(containerClient.stream(message.getContent().asReadOnlyByteBuffer()));
     }
   }
 
@@ -362,10 +362,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
       if (reply != null) {
         List<DatanodeDetails> dnList = reply.getDatanodes();
         if (!dnList.isEmpty()) {
-          Pipeline pipe = xceiverClient.getPipeline();
-
-          LOG.warn("Failed to commit BlockId {} on {}. Failed nodes: {}",
-              blockID, pipe, dnList);
+          LOG.warn("Failed to commit BlockId {} on {}. Failed nodes: {}", blockID, pipeline, dnList);
           failedServers.addAll(dnList);
         }
       }
@@ -397,7 +394,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
     waitFuturesComplete();
     final BlockData blockData = containerBlockData.build();
     if (close) {
-      final ContainerCommandRequestProto putBlockRequest
+/*      final ContainerCommandRequestProto putBlockRequest
           = ContainerProtocolCalls.getPutBlockRequest(
               xceiverClient.getPipeline(), blockData, true, tokenString);
       dataStreamCloseReply = executePutBlockClose(putBlockRequest,
@@ -411,10 +408,10 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
             throw new CompletionException(ex);
           }
         }
-      });
+      });*/
     }
 
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, token)) {
+    try {
       XceiverClientReply asyncReply = containerClient.putBlockAsync(blockData, close);
       final CompletableFuture<ContainerCommandResponseProto> flushFuture
           = asyncReply.getResponse().thenApplyAsync(e -> {
@@ -454,7 +451,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
           });
       putBlockFutures.add(flushFuture);
     } catch (IOException | ExecutionException e) {
-      throw new IOException(EXCEPTION_MSG + e.toString(), e);
+      throw new IOException(EXCEPTION_MSG + e, e);
     } catch (InterruptedException ex) {
       Thread.currentThread().interrupt();
       handleInterruptedException(ex, false);
@@ -487,7 +484,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
 
   @Override
   public void flush() throws IOException {
-    if (xceiverClientFactory != null && xceiverClient != null
+    if (containerApiManager != null && containerClient != null
         && !config.isStreamBufferFlushDelay()) {
       waitFuturesComplete();
     }
@@ -504,9 +501,9 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
   }
 
   /**
-   * @param close whether the flush is happening as part of closing the stream
+   *
    */
-  private void handleFlush(boolean close)
+  private void handleFlush()
       throws IOException, InterruptedException, ExecutionException {
     checkOpen();
     // flush the last chunk data residing on the currentBuffer
@@ -519,13 +516,12 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
         writeChunk(currentBuffer);
         currentBuffer = null;
       }
+
       updateFlushLength();
-      executePutBlock(close, false);
-    } else if (close) {
-      // forcing an "empty" putBlock if stream is being closed without new
-      // data since latest flush - we need to send the "EOF" flag
-      executePutBlock(true, true);
     }
+
+    executePutBlock(true, false);
+
     CompletableFuture.allOf(putBlockFutures.toArray(EMPTY_FUTURE_ARRAY)).get();
     watchForCommit(false);
     // just check again if the exception is hit while waiting for the
@@ -538,9 +534,9 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
 
   @Override
   public void close() throws IOException {
-    if (xceiverClientFactory != null && xceiverClient != null) {
+    if (containerApiManager != null && containerClient != null) {
       try {
-        handleFlush(true);
+        handleFlush();
         dataStreamCloseReply.get();
       } catch (ExecutionException e) {
         handleExecutionException(e);
@@ -554,9 +550,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
     }
   }
 
-  private void validateResponse(
-      ContainerProtos.ContainerCommandResponseProto responseProto)
-      throws IOException {
+  private void validateResponse(ContainerCommandResponseProto responseProto) throws IOException {
     try {
       // if the ioException is already set, it means a prev request has failed
       // just throw the exception. The current operation will fail with the
@@ -565,7 +559,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
       if (exception != null) {
         throw exception;
       }
-      ContainerProtocolCalls.validateContainerResponse(responseProto);
+      ResponseValidatorFactory.getDefault().get(0).accept(null, responseProto);
     } catch (StorageContainerException sce) {
       setIoException(sce);
       throw sce;
@@ -579,19 +573,13 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
       IOException exception =  new IOException(EXCEPTION_MSG + e.toString(), e);
       ioException.compareAndSet(null, exception);
     } else {
-      LOG.debug("Previous request had already failed with " + ioe.toString()
+      LOG.debug("Previous request had already failed with " + ioe
           + " so subsequent request also encounters"
           + " Storage Container Exception ", e);
     }
   }
 
   public void cleanup(boolean invalidateClient) {
-    if (xceiverClientFactory != null) {
-      xceiverClientFactory.releaseClient(xceiverClient, invalidateClient,
-          true);
-    }
-    xceiverClientFactory = null;
-    xceiverClient = null;
     commitWatcher.cleanup();
     responseExecutor.shutdown();
   }
@@ -611,7 +599,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
   }
 
   public boolean isClosed() {
-    return xceiverClient == null;
+    return containerClient == null;
   }
 
   private boolean needSync(long position) {
@@ -670,7 +658,7 @@ public class BlockDataStreamOutput implements ByteBufferStreamOutput {
                 setIoException(ce);
                 throw ce;
               } else if (r.isSuccess()) {
-                xceiverClient.updateCommitInfosMap(r.getCommitInfos());
+                containerClient.updateCommitInfosMap(r.getCommitInfos());
               }
             }, responseExecutor);
 

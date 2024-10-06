@@ -17,6 +17,25 @@
  */
 package org.apache.hadoop.ozone.client.io;
 
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.fs.Syncable;
+import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
+import org.apache.hadoop.hdds.scm.OzoneClientConfig;
+import org.apache.hadoop.hdds.scm.StreamBufferArgs;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
+import org.apache.hadoop.hdds.scm.storage.BlockOutputStream;
+import org.apache.hadoop.hdds.scm.storage.BufferPool;
+import org.apache.hadoop.hdds.scm.storage.RatisBlockOutputStream;
+import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
+import org.apache.hadoop.ozone.util.MetricUtil;
+import org.apache.hadoop.security.token.Token;
+import org.apache.ratis.util.JavaUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Collection;
@@ -25,26 +44,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.function.Supplier;
-
-import org.apache.hadoop.fs.Syncable;
-import org.apache.hadoop.hdds.client.BlockID;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
-import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.scm.storage.BlockOutputStream;
-import org.apache.hadoop.hdds.scm.storage.BufferPool;
-import org.apache.hadoop.hdds.scm.storage.RatisBlockOutputStream;
-import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
-import org.apache.hadoop.ozone.util.MetricUtil;
-import org.apache.hadoop.security.token.Token;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.ratis.util.JavaUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * A BlockOutputStreamEntry manages the data writes into the DataNodes.
@@ -60,7 +59,7 @@ public class BlockOutputStreamEntry extends OutputStream {
   private BlockOutputStream outputStream;
   private BlockID blockID;
   private final String key;
-  private final XceiverClientFactory xceiverClientManager;
+  private final ContainerApiManager containerApiManager;
   private final Pipeline pipeline;
   // total number of bytes that should be written to this stream
   private final long length;
@@ -82,7 +81,7 @@ public class BlockOutputStreamEntry extends OutputStream {
   /**
    * To record how many calls(write, flush) are being handled by this block.
    */
-  private AtomicInteger inflightCalls = new AtomicInteger();
+  private final AtomicInteger inflightCalls = new AtomicInteger();
 
 
   BlockOutputStreamEntry(Builder b) {
@@ -90,7 +89,7 @@ public class BlockOutputStreamEntry extends OutputStream {
     this.outputStream = null;
     this.blockID = b.blockID;
     this.key = b.key;
-    this.xceiverClientManager = b.xceiverClientManager;
+    this.containerApiManager = b.containerApiManager;
     this.pipeline = b.pipeline;
     this.token = b.token;
     this.length = b.length;
@@ -151,12 +150,12 @@ public class BlockOutputStreamEntry extends OutputStream {
   }
 
   /**
-   * Creates the outputStreams that are necessary to start the write.
+   * Creates the outputStreams that are necessary to start to write.
    * Implementors can override this to instantiate multiple streams instead.
    * @throws IOException
    */
   void createOutputStream() throws IOException {
-    outputStream = new RatisBlockOutputStream(blockID, length, xceiverClientManager,
+    outputStream = new RatisBlockOutputStream(blockID, length, containerApiManager,
         pipeline, bufferPool, config, token, clientMetrics, streamBufferArgs,
         executorServiceSupplier);
   }
@@ -343,12 +342,10 @@ public class BlockOutputStreamEntry extends OutputStream {
     currentPosition = getTotalAckDataLength();
   }
 
-  @VisibleForTesting
   public OutputStream getOutputStream() {
     return this.outputStream;
   }
 
-  @VisibleForTesting
   public BlockID getBlockID() {
     return this.blockID;
   }
@@ -368,29 +365,16 @@ public class BlockOutputStreamEntry extends OutputStream {
     return this.config;
   }
 
-  XceiverClientFactory getXceiverClientManager() {
-    return this.xceiverClientManager;
+  ContainerApiManager getContainerApiManager() {
+    return this.containerApiManager;
   }
 
   /**
    * Gets the original Pipeline this entry is initialized with.
    * @return the original pipeline
    */
-  @VisibleForTesting
   public Pipeline getPipeline() {
     return this.pipeline;
-  }
-
-  /**
-   * Gets the Pipeline based on which the location report can be sent to the OM.
-   * This is necessary, as implementors might use special pipeline information
-   * that can be created during commit, but not during initialization,
-   * and might need to update some Pipeline information returned in
-   * OMKeyLocationInfo.
-   * @return
-   */
-  Pipeline getPipelineForOMLocationReport() {
-    return getPipeline();
   }
 
   long getCurrentPosition() {
@@ -408,7 +392,7 @@ public class BlockOutputStreamEntry extends OutputStream {
 
     private BlockID blockID;
     private String key;
-    private XceiverClientFactory xceiverClientManager;
+    private ContainerApiManager containerApiManager;
     private Pipeline pipeline;
     private long length;
     private BufferPool bufferPool;
@@ -437,9 +421,8 @@ public class BlockOutputStreamEntry extends OutputStream {
       return this;
     }
 
-    public Builder setXceiverClientManager(
-        XceiverClientFactory xClientManager) {
-      this.xceiverClientManager = xClientManager;
+    public Builder setContainerApiManager(ContainerApiManager xClientManager) {
+      this.containerApiManager = xClientManager;
       return this;
     }
 

@@ -19,8 +19,10 @@ package org.apache.hadoop.ozone.freon;
 import com.codahale.metrics.Timer;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
+import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
@@ -32,6 +34,9 @@ import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
@@ -91,7 +96,7 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
       defaultValue = "")
   private String datanodes;
 
-  private List<XceiverClientSpi> xceiverClients;
+  private List<ContainerApi> containerClients;
 
   private Timer timer;
 
@@ -117,8 +122,7 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
 
     try (StorageContainerLocationProtocol scmLocationClient =
                createStorageContainerLocationClient(ozoneConf);
-         XceiverClientFactory xceiverClientManager =
-             new XceiverClientManager(ozoneConf)) {
+         ContainerApiManager clientManager = new ContainerApiManagerImpl()) {
       List<Pipeline> pipelinesFromSCM = scmLocationClient.listPipelines();
       Pipeline firstPipeline;
       init();
@@ -130,12 +134,11 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
               .orElseThrow(() -> new IllegalArgumentException(
                   "Pipeline ID is NOT defined, and no pipeline " +
                       "has been found with factor=THREE"));
-        XceiverClientSpi xceiverClientSpi = xceiverClientManager
-            .acquireClient(firstPipeline);
-        xceiverClients = new ArrayList<>();
-        xceiverClients.add(xceiverClientSpi);
+        ContainerApi containerClient = clientManager.acquireClient(firstPipeline);
+        containerClients = new ArrayList<>();
+        containerClients.add(containerClient);
       } else {
-        xceiverClients = new ArrayList<>();
+        containerClients = new ArrayList<>();
         pipelines = new HashSet<>();
         for (String pipelineId:pipelinesFromCmd) {
           List<Pipeline> selectedPipelines =  pipelinesFromSCM.stream()
@@ -146,8 +149,8 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
           pipelines.addAll(selectedPipelines);
         }
         for (Pipeline p:pipelines) {
-          LOG.info("Writing to pipeline: " + p.getId());
-          xceiverClients.add(xceiverClientManager.acquireClient(p));
+          LOG.info("Writing to pipeline: {}", p.getId());
+          containerClients.add(clientManager.acquireClient(p));
         }
         if (pipelines.isEmpty()) {
           throw new IllegalArgumentException(
@@ -155,12 +158,6 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
         }
       }
       runTest();
-    } finally {
-      for (XceiverClientSpi xceiverClientSpi : xceiverClients) {
-        if (xceiverClientSpi != null) {
-          xceiverClientSpi.close();
-        }
-      }
     }
     return null;
   }
@@ -200,10 +197,12 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
       throws Exception {
 
     //Always use this fake blockid.
-    DatanodeBlockID blockId = DatanodeBlockID.newBuilder()
+    DatanodeBlockID datanodeBlockID = DatanodeBlockID.newBuilder()
         .setContainerID(1L)
         .setLocalID(stepNo % 20)
         .build();
+
+    BlockID blockID = BlockID.getFromProtobuf(datanodeBlockID);
 
     ChunkInfo chunkInfo = ChunkInfo.newBuilder()
         .setChunkName(getPrefix() + "_testdata_chunk_" + stepNo)
@@ -212,44 +211,17 @@ public class DatanodeChunkGenerator extends BaseFreonGenerator implements
         .setChecksumData(checksumProtobuf)
         .build();
 
-    WriteChunkRequestProto.Builder writeChunkRequest =
-        WriteChunkRequestProto
-            .newBuilder()
-            .setBlockID(blockId)
-            .setChunkData(chunkInfo)
-            .setData(dataToWrite);
+    ContainerApi containerClient = containerClients.get(
+        (int) (stepNo % (containerClients.size())));
 
-    XceiverClientSpi clientSpi = xceiverClients.get(
-        (int) (stepNo % (xceiverClients.size())));
-    sendWriteChunkRequest(blockId, writeChunkRequest,
-        clientSpi);
-
-  }
-
-  private void sendWriteChunkRequest(DatanodeBlockID blockId,
-      WriteChunkRequestProto.Builder writeChunkRequest,
-      XceiverClientSpi xceiverClientSpi) throws Exception {
-    DatanodeDetails datanodeDetails = xceiverClientSpi.
-        getPipeline().getFirstNode();
-    String id = datanodeDetails.getUuidString();
-
-    ContainerCommandRequestProto.Builder builder =
-        ContainerCommandRequestProto
-            .newBuilder()
-            .setCmdType(Type.WriteChunk)
-            .setContainerID(blockId.getContainerID())
-            .setDatanodeUuid(id)
-            .setWriteChunk(writeChunkRequest);
-
-    ContainerCommandRequestProto request = builder.build();
     timer.time(() -> {
       if (async) {
         XceiverClientReply xceiverClientReply =
-            xceiverClientSpi.sendCommandAsync(request);
-        xceiverClientSpi.watchForCommit(xceiverClientReply.getLogIndex()).get();
+            containerClient.writeChunkAsync(chunkInfo, blockID, dataToWrite, 0, null, false);
 
+        containerClient.watchForCommit(xceiverClientReply.getLogIndex()).get();
       } else {
-        xceiverClientSpi.sendCommand(request);
+        containerClient.writeChunk();
       }
       return null;
     });

@@ -21,7 +21,7 @@ package org.apache.hadoop.hdds.scm.storage;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.ratis.util.JavaUtils;
 import org.apache.ratis.util.MemoizedSupplier;
 import org.slf4j.Logger;
@@ -60,12 +60,12 @@ abstract class AbstractCommitWatcher<BUFFER> {
   private final ConcurrentMap<Long, CompletableFuture<XceiverClientReply>>
       replies = new ConcurrentHashMap<>();
 
-  private final XceiverClientSpi client;
+  private final ContainerApi containerClient;
 
   private final AtomicLong totalAckDataLength = new AtomicLong();
 
-  AbstractCommitWatcher(XceiverClientSpi client) {
-    this.client = client;
+  AbstractCommitWatcher(ContainerApi containerClient) {
+    this.containerClient = containerClient;
   }
 
   @VisibleForTesting
@@ -83,8 +83,8 @@ abstract class AbstractCommitWatcher<BUFFER> {
     return totalAckDataLength.get();
   }
 
-  long addAckDataLength(long acked) {
-    return totalAckDataLength.addAndGet(acked);
+  void addAckDataLength(long acked) {
+    totalAckDataLength.addAndGet(acked);
   }
 
   /**
@@ -135,7 +135,7 @@ abstract class AbstractCommitWatcher<BUFFER> {
       return f;
     }
 
-    return client.watchForCommit(commitIndex).thenApply(reply -> {
+    return containerClient.watchForCommit(commitIndex).thenApply(reply -> {
       f.complete(reply);
       final CompletableFuture<XceiverClientReply> removed = replies.remove(commitIndex);
       Preconditions.checkState(removed == f);
@@ -174,7 +174,7 @@ abstract class AbstractCommitWatcher<BUFFER> {
   }
 
   void releaseBuffersOnException() {
-    adjustBuffers(client.getReplicatedMinCommitIndex());
+    adjustBuffers(containerClient.getReplicatedMinCommitIndex());
   }
 
   IOException getIOExceptionForWatchForCommit(long commitIndex, Exception e) {

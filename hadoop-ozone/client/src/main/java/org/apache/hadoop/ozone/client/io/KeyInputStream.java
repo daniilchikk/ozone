@@ -17,16 +17,11 @@
  */
 package org.apache.hadoop.ozone.client.io;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
-
+import com.google.common.annotations.VisibleForTesting;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
 import org.apache.hadoop.hdds.scm.storage.ByteReaderStrategy;
@@ -35,11 +30,15 @@ import org.apache.hadoop.hdds.scm.storage.PartInputStream;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
-
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static java.util.stream.Collectors.groupingBy;
 
@@ -59,7 +58,7 @@ public class KeyInputStream extends MultipartInputStream {
   private static List<BlockExtendedInputStream> createStreams(
       OmKeyInfo keyInfo,
       List<OmKeyLocationInfo> blockInfos,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<OmKeyInfo, OmKeyInfo> retryFunction,
       BlockInputStreamFactory blockStreamFactory,
       OzoneClientConfig config) throws IOException {
@@ -100,7 +99,7 @@ public class KeyInputStream extends MultipartInputStream {
               omKeyLocationInfo,
               omKeyLocationInfo.getPipeline(),
               omKeyLocationInfo.getToken(),
-              xceiverClientFactory,
+              containerApiManager,
               retry,
               config);
       partStreams.add(stream);
@@ -125,13 +124,13 @@ public class KeyInputStream extends MultipartInputStream {
 
   private static LengthInputStream getFromOmKeyInfo(
       OmKeyInfo keyInfo,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<OmKeyInfo, OmKeyInfo> retryFunction,
       BlockInputStreamFactory blockStreamFactory,
       List<OmKeyLocationInfo> locationInfos,
       OzoneClientConfig config) throws IOException {
     List<BlockExtendedInputStream> streams = createStreams(keyInfo,
-        locationInfos, xceiverClientFactory, retryFunction,
+        locationInfos, containerApiManager, retryFunction,
         blockStreamFactory, config);
     KeyInputStream keyInputStream =
         new KeyInputStream(keyInfo.getKeyName(), streams);
@@ -142,7 +141,7 @@ public class KeyInputStream extends MultipartInputStream {
    * For each block in keyInfo, add a BlockInputStream to blockStreams.
    */
   public static LengthInputStream getFromOmKeyInfo(OmKeyInfo keyInfo,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<OmKeyInfo, OmKeyInfo> retryFunction,
       BlockInputStreamFactory blockStreamFactory,
       OzoneClientConfig config) throws IOException {
@@ -150,12 +149,12 @@ public class KeyInputStream extends MultipartInputStream {
     List<OmKeyLocationInfo> keyLocationInfos = keyInfo
         .getLatestVersionLocations().getBlocksLatestVersionOnly();
 
-    return getFromOmKeyInfo(keyInfo, xceiverClientFactory,
+    return getFromOmKeyInfo(keyInfo, containerApiManager,
         retryFunction, blockStreamFactory, keyLocationInfos, config);
   }
 
   public static List<LengthInputStream> getStreamsFromKeyInfo(OmKeyInfo keyInfo,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<OmKeyInfo, OmKeyInfo> retryFunction,
       BlockInputStreamFactory blockStreamFactory,
       OzoneClientConfig config) throws IOException {
@@ -172,7 +171,7 @@ public class KeyInputStream extends MultipartInputStream {
     List<LengthInputStream> lengthInputStreams = new ArrayList<>();
     // Create a KeyInputStream for each part.
     for (List<OmKeyLocationInfo> locationInfo : partsToBlocksMap.values()) {
-      lengthInputStreams.add(getFromOmKeyInfo(keyInfo, xceiverClientFactory,
+      lengthInputStreams.add(getFromOmKeyInfo(keyInfo, containerApiManager,
           retryFunction, blockStreamFactory, locationInfo,
           config));
     }

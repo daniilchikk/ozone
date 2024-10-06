@@ -23,7 +23,7 @@ import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.storage.BlockExtendedInputStream;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,14 +47,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 public class TestECBlockInputStreamProxy {
 
-  private static final int ONEMB = 1024 * 1024;
+  private static final int ONE_MB = 1024 * 1024;
   private ECReplicationConfig repConfig;
   private TestECBlockInputStreamFactory streamFactory;
 
   private long randomSeed;
-  private ThreadLocalRandom random = ThreadLocalRandom.current();
+  private final ThreadLocalRandom random = ThreadLocalRandom.current();
   private SplittableRandom dataGenerator;
-  private OzoneConfiguration conf = new OzoneConfiguration();
+  private final OzoneConfiguration conf = new OzoneConfiguration();
 
   @BeforeEach
   public void setup() {
@@ -69,21 +69,21 @@ public class TestECBlockInputStreamProxy {
     assertEquals(1,
         ECBlockInputStreamProxy.expectedDataLocations(repConfig, 1));
     assertEquals(2,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, ONEMB + 1));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, ONE_MB + 1));
     assertEquals(3,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 3 * ONEMB));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 3 * ONE_MB));
     assertEquals(3,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 10 * ONEMB));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 10 * ONE_MB));
 
     repConfig = new ECReplicationConfig(6, 3);
     assertEquals(1,
         ECBlockInputStreamProxy.expectedDataLocations(repConfig, 1));
     assertEquals(2,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, ONEMB + 1));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, ONE_MB + 1));
     assertEquals(3,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 3 * ONEMB));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 3 * ONE_MB));
     assertEquals(6,
-        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 10 * ONEMB));
+        ECBlockInputStreamProxy.expectedDataLocations(repConfig, 10 * ONE_MB));
   }
 
   @Test
@@ -164,7 +164,7 @@ public class TestECBlockInputStreamProxy {
   @Test
   public void testCorrectStreamCreatedDependingOnDataLocations()
       throws IOException {
-    int blockLength = 5 * ONEMB;
+    int blockLength = 5 * ONE_MB;
     ByteBuffer data = generateData(blockLength);
 
     Map<DatanodeDetails, Integer> dnMap =
@@ -195,7 +195,7 @@ public class TestECBlockInputStreamProxy {
   @Test
   public void testCanReadNonReconstructionToEOF()
       throws IOException {
-    int blockLength = 5 * ONEMB;
+    int blockLength = 5 * ONE_MB;
     generateData(blockLength);
 
     Map<DatanodeDetails, Integer> dnMap =
@@ -223,7 +223,7 @@ public class TestECBlockInputStreamProxy {
   @Test
   public void testCanReadReconstructionToEOF()
       throws IOException {
-    int blockLength = 5 * ONEMB;
+    int blockLength = 5 * ONE_MB;
     generateData(blockLength);
 
     Map<DatanodeDetails, Integer> dnMap =
@@ -251,7 +251,7 @@ public class TestECBlockInputStreamProxy {
   @Test
   public void testCanHandleErrorAndFailOverToReconstruction()
       throws IOException {
-    int blockLength = 5 * ONEMB;
+    int blockLength = 5 * ONE_MB;
     generateData(blockLength);
 
     Map<DatanodeDetails, Integer> dnMap =
@@ -268,20 +268,18 @@ public class TestECBlockInputStreamProxy {
       int read = bis.read(readBuffer);
       assertEquals(100, read);
       ECStreamTestUtil.assertBufferMatches(readBuffer, dataGenerator);
-      // Setup an error to be thrown part through a read, so the dataBuffer
+      // Set up an error to be thrown part through a read, so the dataBuffer
       // will have been advanced by 50 bytes before the error. This tests it
       // correctly rewinds and the same data is loaded again from the other
       // stream.
       streamFactory.getStreams().get(false).setShouldError(true, 151,
           new BadDataLocationException(badDN, "Simulated Error"));
-      while (true) {
+      do {
         readBuffer.clear();
         read = bis.read(readBuffer);
         ECStreamTestUtil.assertBufferMatches(readBuffer, dataGenerator);
-        if (read < 100) {
-          break;
-        }
-      }
+      } while (read >= 100);
+
       readBuffer.clear();
       read = bis.read(readBuffer);
       assertEquals(-1, read);
@@ -293,7 +291,7 @@ public class TestECBlockInputStreamProxy {
 
   @Test
   public void testCanSeekToNewPosition() throws IOException {
-    int blockLength = 5 * ONEMB;
+    int blockLength = 5 * ONE_MB;
     generateData(blockLength);
 
     Map<DatanodeDetails, Integer> dnMap =
@@ -315,7 +313,7 @@ public class TestECBlockInputStreamProxy {
       ECStreamTestUtil.assertBufferMatches(readBuffer, dataGenerator);
       assertEquals(1124, bis.getPos());
 
-      // Set the non-reconstruction reader to thrown an exception on seek
+      // Set the non-reconstruction reader to throw an exception on seek
       streamFactory.getStreams().get(false).setShouldErrorOnSeek(true);
       bis.seek(2048);
       readBuffer.clear();
@@ -357,7 +355,7 @@ public class TestECBlockInputStreamProxy {
 
     private ByteBuffer data;
 
-    private Map<Boolean, ECStreamTestUtil.TestBlockInputStream> streams
+    private final Map<Boolean, ECStreamTestUtil.TestBlockInputStream> streams
         = new HashMap<>();
 
     private List<DatanodeDetails> failedLocations;
@@ -378,7 +376,7 @@ public class TestECBlockInputStreamProxy {
     public BlockExtendedInputStream create(boolean missingLocations,
         List<DatanodeDetails> failedDatanodes,
         ReplicationConfig repConfig, BlockLocationInfo blockInfo,
-        XceiverClientFactory xceiverFactory,
+        ContainerApiManager containerApiManager,
         Function<BlockID, BlockLocationInfo> refreshFunction,
         OzoneClientConfig config) {
       this.failedLocations = failedDatanodes;

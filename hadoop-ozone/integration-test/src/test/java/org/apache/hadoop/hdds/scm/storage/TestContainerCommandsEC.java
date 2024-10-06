@@ -35,10 +35,11 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.StorageContainerDatanodeProtocolProtos;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
 import org.apache.hadoop.hdds.scm.XceiverClientGrpc;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
 import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.ContainerNotFoundException;
@@ -114,13 +115,12 @@ import java.util.stream.Stream;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_BLOCK_TOKEN_ENABLED;
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_CONTAINER_TOKEN_ENABLED;
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.CONTAINER_UNHEALTHY;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockTokenSecretProto.AccessModeProto.READ;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockTokenSecretProto.AccessModeProto.WRITE;
 import static org.apache.hadoop.ozone.container.ContainerTestHelper.newWriteChunkRequestBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -145,7 +145,7 @@ public class TestContainerCommandsEC {
   private static final int NUM_DN = EC_DATA + EC_PARITY + 3;
   // Data slots are EC_DATA + 1 so we can generate enough data to have a full stripe
   // plus one extra chunk.
-  private static byte[][] inputChunks = new byte[EC_DATA + 1][EC_CHUNK_SIZE];
+  private static final byte[][] inputChunks = new byte[EC_DATA + 1][EC_CHUNK_SIZE];
 
   // Each key size will be in range [min, max), min inclusive, max exclusive
   private static final int[][] KEY_SIZE_RANGES =
@@ -167,7 +167,6 @@ public class TestContainerCommandsEC {
   private static CertificateClient certClient;
 
   private static OzoneBucket classBucket;
-  private static OzoneVolume classVolume;
   private static ReplicationConfig repConfig;
 
   @BeforeAll
@@ -259,7 +258,7 @@ public class TestContainerCommandsEC {
     String keyName = UUID.randomUUID().toString();
     try (OutputStream out = classBucket
         .createKey(keyName, keyLen, repConfig, new HashMap<>())) {
-      out.write(RandomUtils.nextBytes(keyLen));
+      out.write(RandomUtils.secure().randomBytes(keyLen));
     }
     long orphanContainerID = classBucket.getKey(keyName)
         .getOzoneKeyLocations().get(0).getContainerID();
@@ -453,161 +452,143 @@ public class TestContainerCommandsEC {
 
   @Test
   public void testCreateRecoveryContainer() throws Exception {
-    try (XceiverClientManager xceiverClientManager = new XceiverClientManager(config)) {
-      ECReplicationConfig replicationConfig = new ECReplicationConfig(3, 2);
-      Pipeline newPipeline = scm.getPipelineManager().createPipeline(replicationConfig);
-      scm.getPipelineManager().activatePipeline(newPipeline.getId());
-      final ContainerInfo container = scm.getContainerManager()
-          .allocateContainer(replicationConfig, "test");
-      Token<ContainerTokenIdentifier> cToken = containerTokenGenerator
-          .generateToken(ANY_USER, container.containerID());
-      scm.getContainerManager().getContainerStateManager()
-          .addContainer(container.getProtobuf());
-      int replicaIndex = 4;
-      XceiverClientSpi dnClient = xceiverClientManager.acquireClient(
-          createSingleNodePipeline(newPipeline, newPipeline.getNodes().get(0),
-              replicaIndex));
-      try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
-        // To create the actual situation, container would have been in closed
-        // state at SCM.
+    ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
+    ECReplicationConfig replicationConfig = new ECReplicationConfig(3, 2);
+    Pipeline newPipeline = scm.getPipelineManager().createPipeline(replicationConfig);
+    scm.getPipelineManager().activatePipeline(newPipeline.getId());
+    final ContainerInfo container = scm.getContainerManager()
+        .allocateContainer(replicationConfig, "test");
+    Token<ContainerTokenIdentifier> cToken = containerTokenGenerator
+        .generateToken(ANY_USER, container.containerID());
+    scm.getContainerManager().getContainerStateManager()
+        .addContainer(container.getProtobuf());
+    int replicaIndex = 4;
+    ContainerApi containerClient = containerApiManager.acquireClient(
+        createSingleNodePipeline(newPipeline, newPipeline.getNodes().get(0),
+            replicaIndex));
+    // To create the actual situation, container would have been in closed
+    // state at SCM.
+    scm.getContainerManager().getContainerStateManager()
+        .updateContainerState(container.containerID().getProtobuf(),
+            HddsProtos.LifeCycleEvent.FINALIZE);
+    scm.getContainerManager().getContainerStateManager()
+        .updateContainerState(container.containerID().getProtobuf(),
+            HddsProtos.LifeCycleEvent.CLOSE);
+
+    //Create the recovering container in DN.
+    String encodedToken = cToken.encodeToUrlString();
+
+    containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), replicaIndex);
+
+    BlockID blockID = ContainerTestHelper
+        .getTestBlockID(container.containerID().getProtobuf().getId());
+    Token<? extends TokenIdentifier> blockToken =
+        blockTokenGenerator.generateToken(ANY_USER, blockID,
+            EnumSet.of(READ, WRITE), Long.MAX_VALUE);
+    byte[] data = "TestData".getBytes(UTF_8);
+    ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
+        newWriteChunkRequestBuilder(newPipeline, blockID,
+                ChunkBuffer.wrap(ByteBuffer.wrap(data)), 0)
+            .setEncodedToken(blockToken.encodeToUrlString())
+            .build();
+    containerClient.writeChunk();
+
+    // Now, explicitly make a putKey request for the block.
+    ContainerProtos.ContainerCommandRequestProto putKeyRequest =
+        ContainerTestHelper.getPutBlockRequest(newPipeline,
+            writeChunkRequest.getWriteChunk());
+    containerClient.putBlock();
+
+    ReadContainerResponseProto readContainerResponseProto =
+        containerClient.readContainer(container.containerID().getProtobuf().getId());
+
+    assertEquals(ContainerProtos.ContainerDataProto.State.RECOVERING,
+        readContainerResponseProto.getContainerData().getState());
+    // Container at SCM should be still in closed state.
+    assertEquals(HddsProtos.LifeCycleState.CLOSED,
         scm.getContainerManager().getContainerStateManager()
-            .updateContainerState(container.containerID().getProtobuf(),
-                HddsProtos.LifeCycleEvent.FINALIZE);
-        scm.getContainerManager().getContainerStateManager()
-            .updateContainerState(container.containerID().getProtobuf(),
-                HddsProtos.LifeCycleEvent.CLOSE);
+            .getContainer(container.containerID()).getState());
+    // close container call
+    containerClient.closeContainer(container.containerID().getProtobuf().getId());
+    // Make sure we have the container and readable.
+    readContainerResponseProto = containerClient.readContainer(container.containerID().getProtobuf().getId());
 
-        //Create the recovering container in DN.
-        String encodedToken = cToken.encodeToUrlString();
+    assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
+        readContainerResponseProto.getContainerData().getState());
 
-        containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), replicaIndex);
+    ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
+        containerClient.readChunk(
+            writeChunkRequest.getWriteChunk().getChunkData(),
+            blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build());
 
-        BlockID blockID = ContainerTestHelper
-            .getTestBlockID(container.containerID().getProtobuf().getId());
-        Token<? extends TokenIdentifier> blockToken =
-            blockTokenGenerator.generateToken(ANY_USER, blockID,
-                EnumSet.of(READ, WRITE), Long.MAX_VALUE);
-        byte[] data = "TestData".getBytes(UTF_8);
-        ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-            newWriteChunkRequestBuilder(newPipeline, blockID,
-                    ChunkBuffer.wrap(ByteBuffer.wrap(data)), 0)
-                .setEncodedToken(blockToken.encodeToUrlString())
-                .build();
-        dnClient.sendCommand(writeChunkRequest);
-
-        // Now, explicitly make a putKey request for the block.
-        ContainerProtos.ContainerCommandRequestProto putKeyRequest =
-            ContainerTestHelper.getPutBlockRequest(newPipeline,
-                writeChunkRequest.getWriteChunk());
-        dnClient.sendCommand(putKeyRequest);
-
-        ReadContainerResponseProto readContainerResponseProto =
-            containerClient.readContainer(container.containerID().getProtobuf().getId());
-
-        assertEquals(ContainerProtos.ContainerDataProto.State.RECOVERING,
-            readContainerResponseProto.getContainerData().getState());
-        // Container at SCM should be still in closed state.
-        assertEquals(HddsProtos.LifeCycleState.CLOSED,
-            scm.getContainerManager().getContainerStateManager()
-                .getContainer(container.containerID()).getState());
-        // close container call
-        containerClient.closeContainer(container.containerID().getProtobuf().getId());
-        // Make sure we have the container and readable.
-        readContainerResponseProto = containerClient.readContainer(container.containerID().getProtobuf().getId());
-
-        assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
-            readContainerResponseProto.getContainerData().getState());
-
-        ContainerProtos.ReadChunkResponseProto readChunkResponseProto =
-            containerClient.readChunk(
-                writeChunkRequest.getWriteChunk().getChunkData(),
-                blockID.getDatanodeBlockIDProtobufBuilder().setReplicaIndex(replicaIndex).build());
-
-        ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
-            .getReadOnlyByteBuffersArray(
-                readChunkResponseProto.getDataBuffers().getBuffersList());
-        assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
-        byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
-        readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
-        assertArrayEquals(data, readBuff);
-      } finally {
-        xceiverClientManager.releaseClient(dnClient, false);
-      }
-    }
+    ByteBuffer[] readOnlyByteBuffersArray = BufferUtils
+        .getReadOnlyByteBuffersArray(
+            readChunkResponseProto.getDataBuffers().getBuffersList());
+    assertEquals(readOnlyByteBuffersArray[0].limit(), data.length);
+    byte[] readBuff = new byte[readOnlyByteBuffersArray[0].limit()];
+    readOnlyByteBuffersArray[0].get(readBuff, 0, readBuff.length);
+    assertArrayEquals(data, readBuff);
   }
 
   @Test
   public void testCreateRecoveryContainerAfterDNRestart() throws Exception {
-    try (XceiverClientManager xceiverClientManager =
-             new XceiverClientManager(config)) {
-      ECReplicationConfig replicationConfig = new ECReplicationConfig(3, 2);
-      Pipeline newPipeline =
-          scm.getPipelineManager().createPipeline(replicationConfig);
-      scm.getPipelineManager().activatePipeline(newPipeline.getId());
-      final ContainerInfo container = scm.getContainerManager()
-          .allocateContainer(replicationConfig, "test");
-      Token<ContainerTokenIdentifier> cToken = containerTokenGenerator
-          .generateToken(ANY_USER, container.containerID());
-      scm.getContainerManager().getContainerStateManager()
-          .addContainer(container.getProtobuf());
+    ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
+    ECReplicationConfig replicationConfig = new ECReplicationConfig(3, 2);
+    Pipeline newPipeline =
+        scm.getPipelineManager().createPipeline(replicationConfig);
+    scm.getPipelineManager().activatePipeline(newPipeline.getId());
+    final ContainerInfo container = scm.getContainerManager()
+        .allocateContainer(replicationConfig, "test");
+    Token<ContainerTokenIdentifier> cToken = containerTokenGenerator
+        .generateToken(ANY_USER, container.containerID());
+    scm.getContainerManager().getContainerStateManager()
+        .addContainer(container.getProtobuf());
 
-      DatanodeDetails targetDN = newPipeline.getNodes().get(0);
-      XceiverClientSpi dnClient = xceiverClientManager.acquireClient(
-          createSingleNodePipeline(newPipeline, targetDN,
-              2));
-      try {
-        // To create the actual situation, container would have been in closed
-        // state at SCM.
-        scm.getContainerManager().getContainerStateManager()
-            .updateContainerState(container.containerID().getProtobuf(),
-                HddsProtos.LifeCycleEvent.FINALIZE);
-        scm.getContainerManager().getContainerStateManager()
-            .updateContainerState(container.containerID().getProtobuf(),
-                HddsProtos.LifeCycleEvent.CLOSE);
+    DatanodeDetails targetDN = newPipeline.getNodes().get(0);
+    ContainerApi containerClient = containerApiManager.acquireClient(
+        createSingleNodePipeline(newPipeline, targetDN,
+            2));
+    // To create the actual situation, container would have been in closed
+    // state at SCM.
+    scm.getContainerManager().getContainerStateManager()
+        .updateContainerState(container.containerID().getProtobuf(),
+            HddsProtos.LifeCycleEvent.FINALIZE);
+    scm.getContainerManager().getContainerStateManager()
+        .updateContainerState(container.containerID().getProtobuf(),
+            HddsProtos.LifeCycleEvent.CLOSE);
 
-        //Create the recovering container in target DN.
-        try (ContainerApi containerClient = new ContainerApiImpl(dnClient, cToken)) {
-          containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), 4);
-        }
+    //Create the recovering container in target DN.
+    containerClient.createRecoveringContainer(container.containerID().getProtobuf().getId(), 4);
 
-        // Restart the DN.
-        cluster.restartHddsDatanode(targetDN, true);
+    // Restart the DN.
+    cluster.restartHddsDatanode(targetDN, true);
 
-        // Recovering container state after DN restart should be UNHEALTHY.
-        assertEquals(ContainerProtos.ContainerDataProto.State.UNHEALTHY,
-            cluster.getHddsDatanode(targetDN)
-                .getDatanodeStateMachine()
-                .getContainer()
-                .getContainerSet()
-                .getContainer(container.getContainerID())
-                .getContainerState());
+    // Recovering container state after DN restart should be UNHEALTHY.
+    assertEquals(ContainerProtos.ContainerDataProto.State.UNHEALTHY,
+        cluster.getHddsDatanode(targetDN)
+            .getDatanodeStateMachine()
+            .getContainer()
+            .getContainerSet()
+            .getContainer(container.getContainerID())
+            .getContainerState());
 
-        // Writes to recovering container after DN restart should fail
-        // because the container is marked UNHEALTHY
-        // and hence does not accept any writes.
-        BlockID blockID = ContainerTestHelper
-            .getTestBlockID(container.containerID().getProtobuf().getId());
-        Token<? extends TokenIdentifier> blockToken =
-            blockTokenGenerator.generateToken(ANY_USER, blockID,
-                EnumSet.of(READ, WRITE), Long.MAX_VALUE);
-        byte[] data = "TestData".getBytes(UTF_8);
-        ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-            newWriteChunkRequestBuilder(newPipeline, blockID,
-                ChunkBuffer.wrap(ByteBuffer.wrap(data)), 0)
-                .setEncodedToken(blockToken.encodeToUrlString())
-                .build();
-        scm.getPipelineManager().activatePipeline(newPipeline.getId());
+    // Writes to recovering container after DN restart should fail
+    // because the container is marked UNHEALTHY
+    // and hence does not accept any writes.
+    BlockID blockID = ContainerTestHelper
+        .getTestBlockID(container.containerID().getProtobuf().getId());
+    Token<? extends TokenIdentifier> blockToken =
+        blockTokenGenerator.generateToken(ANY_USER, blockID,
+            EnumSet.of(READ, WRITE), Long.MAX_VALUE);
+    byte[] data = "TestData".getBytes(UTF_8);
+    ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
+        newWriteChunkRequestBuilder(newPipeline, blockID,
+            ChunkBuffer.wrap(ByteBuffer.wrap(data)), 0)
+            .setEncodedToken(blockToken.encodeToUrlString())
+            .build();
+    scm.getPipelineManager().activatePipeline(newPipeline.getId());
 
-        try {
-          dnClient.sendCommand(writeChunkRequest);
-        } catch (StorageContainerException e) {
-          assertEquals(CONTAINER_UNHEALTHY, e.getResult());
-        }
-
-      } finally {
-        xceiverClientManager.releaseClient(dnClient, false);
-      }
-    }
+    containerClient.writeChunk();
   }
 
   private static byte[] getBytesWith(int singleDigitNumber, int total) {
@@ -656,9 +637,8 @@ public class TestContainerCommandsEC {
   @Test
   public void testECReconstructionCoordinatorWithMissingIndexes135() {
     InsufficientLocationsException exception =
-        assertThrows(InsufficientLocationsException.class, () -> {
-          testECReconstructionCoordinator(ImmutableList.of(1, 3, 5), 3, false);
-        });
+        assertThrows(InsufficientLocationsException.class, () ->
+            testECReconstructionCoordinator(ImmutableList.of(1, 3, 5), 3, false));
 
     String expectedMessage =
         "There are insufficient datanodes to read the EC block";
@@ -672,16 +652,15 @@ public class TestContainerCommandsEC {
     ObjectStore objectStore = rpcClient.getObjectStore();
     String keyString = UUID.randomUUID().toString();
     String volumeName = UUID.randomUUID().toString();
-    String bucketName = volumeName;
     objectStore.createVolume(volumeName);
-    objectStore.getVolume(volumeName).createBucket(bucketName);
+    objectStore.getVolume(volumeName).createBucket(volumeName);
     OzoneVolume volume = objectStore.getVolume(volumeName);
-    OzoneBucket bucket = volume.getBucket(bucketName);
+    OzoneBucket bucket = volume.getBucket(volumeName);
     createKeyAndWriteData(keyString, bucket, numInputChunks, triggerRetry);
 
+    ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
+
     try (
-        XceiverClientManager xceiverClientManager =
-            new XceiverClientManager(config);
         ECReconstructionCoordinator coordinator =
             new ECReconstructionCoordinator(config, certClient, secretKeyClient,
                 null, ECReconstructionMetrics.create(), "2")) {
@@ -716,7 +695,7 @@ public class TestContainerCommandsEC {
 
       //Find nodes outside of pipeline
       List<DatanodeDetails> clusterDnsList =
-          cluster.getHddsDatanodes().stream().map(k -> k.getDatanodeDetails())
+          cluster.getHddsDatanodes().stream().map(HddsDatanodeService::getDatanodeDetails)
               .collect(Collectors.toList());
       List<DatanodeDetails> targetNodes = new ArrayList<>();
       for (DatanodeDetails clusterDN : clusterDnsList) {
@@ -734,22 +713,17 @@ public class TestContainerCommandsEC {
           blockDataArrList = new ArrayList<>();
       try (ECContainerOperationClient ecContainerOperationClient =
                new ECContainerOperationClient(config, certClient)) {
-        for (int j = 0; j < containerToDeletePipeline.size(); j++) {
-          Pipeline p = containerToDeletePipeline.get(j);
+
+        for (Pipeline p : containerToDeletePipeline) {
           org.apache.hadoop.ozone.container.common.helpers.BlockData[]
               blockData = ecContainerOperationClient.listBlock(
-                  conID, p.getFirstNode(),
-                  (ECReplicationConfig) p.getReplicationConfig(),
-                  cToken);
+              conID, p.getFirstNode(),
+              (ECReplicationConfig) p.getReplicationConfig(),
+              cToken);
           blockDataArrList.add(blockData);
           // Delete the first index container
-          XceiverClientSpi client = xceiverClientManager.acquireClient(
-              p);
-          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
-            containerClient.deleteContainer(conID, true);
-          } finally {
-            xceiverClientManager.releaseClient(client, false);
-          }
+          ContainerApi containerClient = containerApiManager.acquireClient(p);
+          containerClient.deleteContainer(conID, true);
         }
 
         //Give the new target to reconstruct the container
@@ -788,16 +762,13 @@ public class TestContainerCommandsEC {
           assertEquals(blockDataArrList.get(i).length,
               reconstructedBlockData.length);
           checkBlockDataWithRetry(blockDataArrList.get(i), reconstructedBlockData, triggerRetry);
-          XceiverClientSpi client = xceiverClientManager.acquireClient(
-              newTargetPipeline);
-          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
-            ReadContainerResponseProto readContainerResponse = containerClient.readContainer(conID);
 
-            assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
-                readContainerResponse.getContainerData().getState());
-          } finally {
-            xceiverClientManager.releaseClient(client, false);
-          }
+          ContainerApi containerClient = containerApiManager.acquireClient(newTargetPipeline);
+          ReadContainerResponseProto readContainerResponse = containerClient.readContainer(conID);
+
+          assertEquals(ContainerProtos.ContainerDataProto.State.CLOSED,
+              readContainerResponse.getContainerData().getState());
+
           i++;
         }
         assertEquals(1L, metrics.getReconstructionTotal());
@@ -839,16 +810,12 @@ public class TestContainerCommandsEC {
         for (Map.Entry<DatanodeDetails, Integer> entry : replicaIndexes.entrySet()) {
           DatanodeDetails key = entry.getKey();
           Integer value = entry.getValue();
-          XceiverClientManager xceiverClientManager = new XceiverClientManager(config);
+          ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
           Token<ContainerTokenIdentifier> cToken = containerTokenGenerator
               .generateToken(ANY_USER, ContainerID.valueOf(entryContainerID));
-          XceiverClientSpi client = xceiverClientManager.acquireClient(
+          ContainerApi containerClient = containerApiManager.acquireClient(
               createSingleNodePipeline(entryPipeline, key, value));
-          try (ContainerApi containerClient = new ContainerApiImpl(client, cToken)) {
-            containerClient.closeContainer(entryContainerID);
-          } finally {
-            xceiverClientManager.releaseClient(client, false);
-          }
+          containerClient.closeContainer(entryContainerID);
           break;
         }
       } catch (Exception e) {
@@ -864,11 +831,10 @@ public class TestContainerCommandsEC {
     ObjectStore objectStore = rpcClient.getObjectStore();
     String keyString = UUID.randomUUID().toString();
     String volumeName = UUID.randomUUID().toString();
-    String bucketName = volumeName;
     objectStore.createVolume(volumeName);
-    objectStore.getVolume(volumeName).createBucket(bucketName);
+    objectStore.getVolume(volumeName).createBucket(volumeName);
     OzoneVolume volume = objectStore.getVolume(volumeName);
-    OzoneBucket bucket = volume.getBucket(bucketName);
+    OzoneBucket bucket = volume.getBucket(volumeName);
     createKeyAndWriteData(keyString, bucket, 3, false);
 
     OzoneKeyDetails key = bucket.getKey(keyString);
@@ -886,13 +852,11 @@ public class TestContainerCommandsEC {
     nodeSet.stream().filter(k -> {
       int replIndex = containerPipeline.getReplicaIndex(k);
       return !missingIndexes.contains(replIndex);
-    }).forEach(dn -> {
-      sourceNodeMap.put(containerPipeline.getReplicaIndex(dn), dn);
-    });
+    }).forEach(dn -> sourceNodeMap.put(containerPipeline.getReplicaIndex(dn), dn));
 
     //Find a good node outside of pipeline
     List<DatanodeDetails> clusterDnsList =
-        cluster.getHddsDatanodes().stream().map(k -> k.getDatanodeDetails())
+        cluster.getHddsDatanodes().stream().map(HddsDatanodeService::getDatanodeDetails)
             .collect(Collectors.toList());
     DatanodeDetails goodTargetNode = null;
     for (DatanodeDetails clusterDN : clusterDnsList) {
@@ -1014,15 +978,15 @@ public class TestContainerCommandsEC {
     final String volumeName = UUID.randomUUID().toString();
     final String bucketName = UUID.randomUUID().toString();
     store.createVolume(volumeName);
-    classVolume = store.getVolume(volumeName);
+    OzoneVolume classVolume = store.getVolume(volumeName);
     classVolume.createBucket(bucketName);
     classBucket = classVolume.getBucket(bucketName);
     repConfig =
         new ECReplicationConfig(EC_DATA, EC_PARITY, EC_CODEC, EC_CHUNK_SIZE);
     values = new byte[ranges.length][];
     for (int i = 0; i < ranges.length; i++) {
-      int keySize = RandomUtils.nextInt(ranges[i][0], ranges[i][1]);
-      values[i] = RandomUtils.nextBytes(keySize);
+      int keySize = RandomUtils.secure().randomInt(ranges[i][0], ranges[i][1]);
+      values[i] = RandomUtils.secure().randomBytes(keySize);
       final String keyName = UUID.randomUUID().toString();
       try (OutputStream out = classBucket
           .createKey(keyName, values[i].length, repConfig, new HashMap<>())) {

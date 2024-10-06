@@ -81,23 +81,9 @@ public class MockXceiverClientFactory
   }
 
   @Override
-  public XceiverClientSpi acquireClient(Pipeline pipeline)
-      throws IOException {
-    return acquireClient(pipeline, false);
-  }
-
-  @Override
   public void releaseClient(XceiverClientSpi xceiverClient,
       boolean invalidateClient) {
 
-  }
-
-  @Override
-  public XceiverClientSpi acquireClientForReadData(Pipeline pipeline)
-      throws IOException {
-    return new MockXceiverClientSpi(pipeline, storage
-        .computeIfAbsent(pipeline.getFirstNode(),
-            r -> new MockDatanodeStorage()));
   }
 
   @Override

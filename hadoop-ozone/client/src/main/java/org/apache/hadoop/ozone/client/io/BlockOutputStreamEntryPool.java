@@ -18,22 +18,14 @@
  */
 package org.apache.hadoop.ozone.client.io;
 
-import java.io.IOException;
-import java.time.Clock;
-import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ListIterator;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.function.Supplier;
-
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import org.apache.hadoop.hdds.client.ContainerBlockID;
 import org.apache.hadoop.hdds.scm.ByteStringConversion;
 import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ExcludeList;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.hdds.scm.storage.BufferPool;
@@ -44,11 +36,18 @@ import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
 import org.apache.hadoop.ozone.om.helpers.OmMultipartCommitUploadPartInfo;
 import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
 import org.apache.hadoop.ozone.util.MetricUtil;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.time.Clock;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Supplier;
 
 /**
  * A BlockOutputStreamEntryPool manages the communication with OM during writing
@@ -75,7 +74,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
   private int currentStreamIndex;
   private final OzoneManagerProtocol omClient;
   private final OmKeyArgs keyArgs;
-  private final XceiverClientFactory xceiverClientFactory;
+  private final ContainerApiManager containerApiManager;
   /**
    * A {@link BufferPool} shared between all
    * {@link org.apache.hadoop.hdds.scm.storage.BlockOutputStream}s managed by
@@ -93,7 +92,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
 
   public BlockOutputStreamEntryPool(KeyOutputStream.Builder b) {
     this.config = b.getClientConfig();
-    this.xceiverClientFactory = b.getXceiverManager();
+    this.containerApiManager = b.getContainerApiManager();
     currentStreamIndex = 0;
     this.omClient = b.getOmClient();
     final OmKeyInfo info = b.getOpenHandler().getKeyInfo();
@@ -159,7 +158,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
         new BlockOutputStreamEntry.Builder()
             .setBlockID(subKeyInfo.getBlockID())
             .setKey(keyArgs.getKeyName())
-            .setXceiverClientManager(xceiverClientFactory)
+            .setContainerApiManager(containerApiManager)
             .setPipeline(subKeyInfo.getPipeline())
             .setConfig(config)
             .setLength(subKeyInfo.getLength())
@@ -185,9 +184,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
   @VisibleForTesting
   public List<OmKeyLocationInfo> getLocationInfoList() {
     List<OmKeyLocationInfo> locationInfoList;
-    List<OmKeyLocationInfo> currBlocksLocationInfoList =
-        getOmKeyLocationInfos(streamEntries);
-    locationInfoList = currBlocksLocationInfoList;
+    locationInfoList = getOmKeyLocationInfos(streamEntries);
     return locationInfoList;
   }
 
@@ -276,8 +273,8 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
   }
 
   @VisibleForTesting
-  XceiverClientFactory getXceiverClientFactory() {
-    return xceiverClientFactory;
+  ContainerApiManager getContainerApiManager() {
+    return containerApiManager;
   }
 
   String getKeyName() {
@@ -348,7 +345,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
       if (keyArgs.getIsMultipartKey()) {
         throw new IOException("Hsync is unsupported for multipart keys.");
       } else {
-        if (keyArgs.getLocationInfoList().size() == 0) {
+        if (keyArgs.getLocationInfoList().isEmpty()) {
           MetricUtil.captureLatencyNs(clientMetrics::addOMHsyncLatency,
               () -> omClient.hsyncKey(keyArgs, openID));
         } else {
@@ -413,9 +410,7 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
       bufferPool.clearBufferPool();
     }
 
-    if (streamEntries != null) {
-      streamEntries.clear();
-    }
+    streamEntries.clear();
   }
 
   public OmMultipartCommitUploadPartInfo getCommitUploadPartInfo() {
@@ -426,8 +421,8 @@ public class BlockOutputStreamEntryPool implements KeyMetadataAware {
     return excludeList;
   }
 
-  boolean isEmpty() {
-    return streamEntries.isEmpty();
+  boolean isNonEmpty() {
+    return !streamEntries.isEmpty();
   }
 
   @Override

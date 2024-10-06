@@ -434,7 +434,7 @@ public final class ECKeyOutputStream extends KeyOutputStream
   private void closeCurrentStreamEntry()
       throws IOException {
     final ECBlockOutputStreamEntryPool blockOutputStreamEntryPool = getBlockOutputStreamEntryPool();
-    if (!blockOutputStreamEntryPool.isEmpty()) {
+    if (blockOutputStreamEntryPool.isNonEmpty()) {
       while (true) {
         try {
           BlockOutputStreamEntry entry =

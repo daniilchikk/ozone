@@ -18,11 +18,6 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.io.IOException;
-import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
-
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.RandomUtils;
@@ -37,13 +32,13 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetCommitt
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.scm.ContainerClientMetrics;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.StreamBufferArgs;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientReply;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
@@ -56,6 +51,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static java.util.concurrent.Executors.newFixedThreadPool;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,7 +71,7 @@ import static org.mockito.Mockito.when;
 class TestBlockOutputStreamCorrectness {
 
   private static final int DATA_SIZE = 256 * (int) OzoneConsts.MB;
-  private static final byte[] DATA = RandomUtils.nextBytes(DATA_SIZE);
+  private static final byte[] DATA = RandomUtils.secure().randomBytes(DATA_SIZE);
 
   @ParameterizedTest
   @ValueSource(ints = { 1, 1024, 1024 * 1024 })
@@ -158,9 +158,9 @@ class TestBlockOutputStreamCorrectness {
 
     final Pipeline pipeline = MockPipeline.createRatisPipeline();
 
-    final XceiverClientManager xcm = mock(XceiverClientManager.class);
-    when(xcm.acquireClient(any()))
-        .thenReturn(new MockXceiverClientSpi(pipeline));
+    final ContainerApiManager cam = mock(ContainerApiManager.class);
+    when(cam.acquireClient(any()))
+        .thenReturn(mock(ContainerApi.class));
 
     OzoneClientConfig config = new OzoneClientConfig();
     config.setStreamBufferSize(4 * 1024 * 1024);
@@ -175,7 +175,7 @@ class TestBlockOutputStreamCorrectness {
     return new RatisBlockOutputStream(
         new BlockID(1L, 1L),
         -1,
-        xcm,
+        cam,
         pipeline,
         bufferPool,
         config,
@@ -187,15 +187,15 @@ class TestBlockOutputStreamCorrectness {
 
   private ECBlockOutputStream createECBlockOutputStream(OzoneClientConfig clientConfig,
       ECReplicationConfig repConfig, BlockID blockID, Pipeline pipeline) throws IOException {
-    final XceiverClientManager xcm = mock(XceiverClientManager.class);
-    when(xcm.acquireClient(any()))
-        .thenReturn(new MockXceiverClientSpi(pipeline));
+    final ContainerApiManager containerApiManager = mock(ContainerApiManager.class);
+    when(containerApiManager.acquireClient(any()))
+        .thenReturn(mock(ContainerApi.class));
 
     ContainerClientMetrics clientMetrics = ContainerClientMetrics.acquire();
     StreamBufferArgs streamBufferArgs =
         StreamBufferArgs.getDefaultStreamBufferArgs(repConfig, clientConfig);
 
-    return new ECBlockOutputStream(blockID, xcm, pipeline, BufferPool.empty(), clientConfig, null,
+    return new ECBlockOutputStream(blockID, containerApiManager, pipeline, BufferPool.empty(), clientConfig, null,
         clientMetrics, streamBufferArgs, () -> newFixedThreadPool(2));
   }
 
@@ -269,11 +269,6 @@ class TestBlockOutputStreamCorrectness {
       result.setLogIndex(counter.incrementAndGet());
       return result;
 
-    }
-
-    @Override
-    public ReplicationType getPipelineType() {
-      return null;
     }
 
     @Override

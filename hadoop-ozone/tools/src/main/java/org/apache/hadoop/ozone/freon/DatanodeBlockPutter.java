@@ -23,14 +23,13 @@ import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumData;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.PutBlockRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Type;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
@@ -40,8 +39,10 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Callable;
+
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType.CRC32;
 
 /**
  * Datanode test for block creation.
@@ -77,11 +78,13 @@ public class DatanodeBlockPutter extends BaseFreonGenerator implements
       defaultValue = "")
   private String pipelineId;
 
-  private XceiverClientSpi client;
-
   private Timer timer;
 
   private ChecksumData checksumProtobuf;
+
+  private ContainerApiManager containerApiManager;
+
+  private Pipeline pipeline;
 
   @Override
   public Void call() throws Exception {
@@ -90,37 +93,29 @@ public class DatanodeBlockPutter extends BaseFreonGenerator implements
 
     OzoneConfiguration ozoneConf = createOzoneConfiguration();
     if (OzoneSecurityUtil.isSecurityEnabled(ozoneConf)) {
-      throw new IllegalArgumentException(
-          "datanode-block-putter is not supported in secure environment");
+      throw new IllegalArgumentException("datanode-block-putter is not supported in secure environment");
     }
 
     try (StorageContainerLocationProtocol scmLocationClient =
         createStorageContainerLocationClient(ozoneConf)) {
-      Pipeline pipeline =
-          findPipelineForTest(pipelineId, scmLocationClient, LOG);
+      this.pipeline = findPipelineForTest(pipelineId, scmLocationClient, LOG);
 
-      try (XceiverClientFactory xceiverClientManager =
-               new XceiverClientManager(ozoneConf)) {
-        client = xceiverClientManager.acquireClient(pipeline);
+      this.containerApiManager = new ContainerApiManagerImpl();
 
-        timer = getMetrics().timer("put-block");
+      timer = getMetrics().timer("put-block");
 
-        byte[] data = RandomStringUtils.randomAscii(chunkSize)
-            .getBytes(StandardCharsets.UTF_8);
-        Checksum checksum = new Checksum(ChecksumType.CRC32, 1024 * 1024);
-        checksumProtobuf = checksum.computeChecksum(data).getProtoBufMessage();
+      byte[] data = RandomStringUtils.secure().nextAscii(chunkSize).getBytes(UTF_8);
+      Checksum checksum = new Checksum(CRC32, 1024 * 1024);
+      checksumProtobuf = checksum.computeChecksum(data).getProtoBufMessage();
 
-        runTests(this::putBlock);
-      }
-    } finally {
-      if (client != null) {
-        client.close();
-      }
+      runTests(this::putBlock);
     }
     return null;
   }
 
   private void putBlock(long stepNo) throws Exception {
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+
     ContainerProtos.DatanodeBlockID blockId =
         ContainerProtos.DatanodeBlockID.newBuilder()
             .setContainerID(1L)
@@ -143,19 +138,17 @@ public class DatanodeBlockPutter extends BaseFreonGenerator implements
         .newBuilder()
         .setBlockData(blockData);
 
-    String id = client.getPipeline().getFirstNode().getUuidString();
 
     ContainerCommandRequestProto.Builder builder =
         ContainerCommandRequestProto
             .newBuilder()
             .setCmdType(Type.PutBlock)
             .setContainerID(blockId.getContainerID())
-            .setDatanodeUuid(id)
             .setPutBlock(putBlockRequest);
 
     ContainerCommandRequestProto request = builder.build();
     timer.time(() -> {
-      client.sendCommand(request);
+      containerClient.putBlock();
       return null;
     });
   }

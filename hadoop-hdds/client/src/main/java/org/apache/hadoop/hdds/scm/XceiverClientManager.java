@@ -150,11 +150,6 @@ public class XceiverClientManager implements XceiverClientFactory {
     return securityEnabled;
   }
 
-  @Override
-  public XceiverClientSpi acquireClient(Pipeline pipeline) throws IOException {
-    return acquireClient(pipeline, false);
-  }
-
   /**
    * {@inheritDoc}
    *
@@ -164,20 +159,13 @@ public class XceiverClientManager implements XceiverClientFactory {
   @Override
   public XceiverClientSpi acquireClient(Pipeline pipeline, boolean topologyAware) throws IOException {
     Preconditions.checkNotNull(pipeline);
-    Preconditions.checkArgument(pipeline.getNodes() != null);
-    Preconditions.checkArgument(!pipeline.getNodes().isEmpty(),
-        NO_REPLICA_FOUND);
+    Preconditions.checkArgument(!pipeline.getNodes().isEmpty(), NO_REPLICA_FOUND);
 
     synchronized (clientCache) {
       XceiverClientSpi info = getClient(pipeline, topologyAware);
       info.incrementReference();
       return info;
     }
-  }
-
-  @Override
-  public XceiverClientSpi acquireClientForReadData(Pipeline pipeline) throws IOException {
-    return acquireClient(pipeline);
   }
 
   @Override

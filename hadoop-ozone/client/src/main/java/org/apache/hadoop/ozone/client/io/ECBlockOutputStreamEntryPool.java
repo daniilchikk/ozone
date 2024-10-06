@@ -41,7 +41,7 @@ public class ECBlockOutputStreamEntryPool extends BlockOutputStreamEntryPool {
     final ECBlockOutputStreamEntry.Builder b = new ECBlockOutputStreamEntry.Builder();
     b.setBlockID(subKeyInfo.getBlockID())
             .setKey(getKeyName())
-            .setXceiverClientManager(getXceiverClientFactory())
+            .setContainerApiManager(getContainerApiManager())
             .setPipeline(subKeyInfo.getPipeline())
             .setConfig(getConfig())
             .setLength(subKeyInfo.getLength())

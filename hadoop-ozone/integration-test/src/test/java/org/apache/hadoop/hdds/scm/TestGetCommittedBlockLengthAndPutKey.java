@@ -23,13 +23,14 @@ import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.container.placement.algorithms.SCMContainerPlacementCapacity;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocolPB.StorageContainerLocationProtocolClientSideTranslatorPB;
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.ozone.OzoneConsts;
@@ -62,7 +63,7 @@ public class TestGetCommittedBlockLengthAndPutKey {
   private static OzoneConfiguration ozoneConfig;
   private static StorageContainerLocationProtocolClientSideTranslatorPB
       storageContainerLocationClient;
-  private static XceiverClientManager xceiverClientManager;
+  private static ContainerApiManager containerApiManager;
 
   @BeforeAll
   public static void init() throws Exception {
@@ -74,7 +75,7 @@ public class TestGetCommittedBlockLengthAndPutKey {
     cluster.waitForClusterToBeReady();
     storageContainerLocationClient =
         cluster.getStorageContainerLocationClient();
-    xceiverClientManager = new XceiverClientManager(ozoneConfig);
+    containerApiManager = new ContainerApiManagerImpl();
   }
 
   @AfterAll
@@ -94,37 +95,34 @@ public class TestGetCommittedBlockLengthAndPutKey {
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
     long containerID = container.getContainerInfo().getContainerID();
     Pipeline pipeline = container.getPipeline();
-    XceiverClientSpi client = xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     //create the container
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.createContainer(containerID);
+    containerClient.createContainer(containerID);
 
-      BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
-      byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(1, 1024)).getBytes(UTF_8);
-      ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-          ContainerTestHelper
-              .getWriteChunkRequest(container.getPipeline(), blockID,
-                  data.length);
-      client.sendCommand(writeChunkRequest);
-      // Now, explicitly make a putKey request for the block.
-      ContainerProtos.ContainerCommandRequestProto putKeyRequest =
-          ContainerTestHelper
-              .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
-      client.sendCommand(putKeyRequest);
-      GenericTestUtils.waitFor(() -> {
-        try {
-          response.set(containerClient.getCommittedBlockLength(blockID));
-          return true;
-        } catch (IOException e) {
-          LOG.debug("Ignore the exception till wait: {}", e.getMessage());
-          return false;
-        }
-      }, 500, 5000);
-      // make sure the block ids in the request and response are same.
-      assertEquals(blockID, BlockID.getFromProtobuf(response.get().getBlockID()));
-      assertEquals(data.length, response.get().getBlockLength());
-      xceiverClientManager.releaseClient(client, false);
-    }
+    BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
+    byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(1, 1024)).getBytes(UTF_8);
+    ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
+        ContainerTestHelper
+            .getWriteChunkRequest(container.getPipeline(), blockID,
+                data.length);
+    containerClient.writeChunk();
+    // Now, explicitly make a putKey request for the block.
+    ContainerProtos.ContainerCommandRequestProto putKeyRequest =
+        ContainerTestHelper
+            .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
+    containerClient.putBlock();
+    GenericTestUtils.waitFor(() -> {
+      try {
+        response.set(containerClient.getCommittedBlockLength(blockID));
+        return true;
+      } catch (IOException e) {
+        LOG.debug("Ignore the exception till wait: {}", e.getMessage());
+        return false;
+      }
+    }, 500, 5000);
+    // make sure the block ids in the request and response are same.
+    assertEquals(blockID, BlockID.getFromProtobuf(response.get().getBlockID()));
+    assertEquals(data.length, response.get().getBlockLength());
   }
 
   @Test
@@ -133,22 +131,18 @@ public class TestGetCommittedBlockLengthAndPutKey {
         .allocateContainer(SCMTestUtils.getReplicationType(ozoneConfig),
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
     long containerID = container.getContainerInfo().getContainerID();
-    XceiverClientSpi client = xceiverClientManager.acquireClient(container.getPipeline());
+    ContainerApi containerClient = containerApiManager.acquireClient(container.getPipeline());
 
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.createContainer(containerID);
+    containerClient.createContainer(containerID);
 
-      BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
-      // move the container to closed state
-      containerClient.closeContainer(containerID);
+    BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
+    // move the container to closed state
+    containerClient.closeContainer(containerID);
 
-      // There is no block written inside the container. The request should fail.
-      Throwable t = assertThrows(StorageContainerException.class,
-          () -> containerClient.getCommittedBlockLength(blockID));
-      assertThat(t.getMessage()).contains("Unable to find the block");
-    }
-
-    xceiverClientManager.releaseClient(client, false);
+    // There is no block written inside the container. The request should fail.
+    Throwable t = assertThrows(StorageContainerException.class,
+        () -> containerClient.getCommittedBlockLength(blockID));
+    assertThat(t.getMessage()).contains("Unable to find the block");
   }
 
   @Test
@@ -159,35 +153,33 @@ public class TestGetCommittedBlockLengthAndPutKey {
             HddsProtos.ReplicationFactor.ONE, OzoneConsts.OZONE);
     long containerID = container.getContainerInfo().getContainerID();
     Pipeline pipeline = container.getPipeline();
-    XceiverClientSpi client = xceiverClientManager.acquireClient(pipeline);
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
     //create the container
-    try (ContainerApi containerClient = new ContainerApiImpl(client, null)) {
-      containerClient.createContainer(containerID);
 
-      BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
-      byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(1, 1024)).getBytes(UTF_8);
-      ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
-          ContainerTestHelper
-              .getWriteChunkRequest(container.getPipeline(), blockID,
-                  data.length);
-      client.sendCommand(writeChunkRequest);
-      // Now, explicitly make a putKey request for the block.
-      ContainerProtos.ContainerCommandRequestProto putKeyRequest =
-          ContainerTestHelper
-              .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
-      response = client.sendCommand(putKeyRequest).getPutBlock();
-      assertEquals(response.getCommittedBlockLength().getBlockLength(), data.length);
-      assertThat(response.getCommittedBlockLength().getBlockID().getBlockCommitSequenceId())
-          .isGreaterThan(0);
-      BlockID responseBlockID = BlockID
-          .getFromProtobuf(response.getCommittedBlockLength().getBlockID());
-      blockID
-          .setBlockCommitSequenceId(responseBlockID.getBlockCommitSequenceId());
-      // make sure the block ids in the request and response are same.
-      // This will also ensure that closing the container committed the block
-      // on the Datanodes.
-      assertEquals(responseBlockID, blockID);
-    }
-    xceiverClientManager.releaseClient(client, false);
+    containerClient.createContainer(containerID);
+
+    BlockID blockID = ContainerTestHelper.getTestBlockID(containerID);
+    byte[] data = RandomStringUtils.secure().next(RandomUtils.secure().randomInt(1, 1024)).getBytes(UTF_8);
+    ContainerProtos.ContainerCommandRequestProto writeChunkRequest =
+        ContainerTestHelper
+            .getWriteChunkRequest(container.getPipeline(), blockID,
+                data.length);
+    containerClient.writeChunk();
+    // Now, explicitly make a putKey request for the block.
+    ContainerProtos.ContainerCommandRequestProto putKeyRequest =
+        ContainerTestHelper
+            .getPutBlockRequest(pipeline, writeChunkRequest.getWriteChunk());
+    response = containerClient.putBlock();
+    assertEquals(response.getCommittedBlockLength().getBlockLength(), data.length);
+    assertThat(response.getCommittedBlockLength().getBlockID().getBlockCommitSequenceId())
+        .isGreaterThan(0);
+    BlockID responseBlockID = BlockID
+        .getFromProtobuf(response.getCommittedBlockLength().getBlockID());
+    blockID
+        .setBlockCommitSequenceId(responseBlockID.getBlockCommitSequenceId());
+    // make sure the block ids in the request and response are same.
+    // This will also ensure that closing the container committed the block
+    // on the Datanodes.
+    assertEquals(responseBlockID, blockID);
   }
 }

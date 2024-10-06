@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.ozone.client.checksum;
 
+import jakarta.annotation.Nonnull;
 import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.MD5MD5CRC32FileChecksum;
 import org.apache.hadoop.fs.MD5MD5CRC32GzipFileChecksum;
@@ -30,13 +31,11 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientGrpc;
-import org.apache.hadoop.hdds.scm.XceiverClientReply;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.PipelineID;
 import org.apache.hadoop.ozone.client.MockOmTransport;
-import org.apache.hadoop.ozone.client.MockXceiverClientFactory;
 import org.apache.hadoop.ozone.client.ObjectStore;
 import org.apache.hadoop.ozone.client.OzoneBucket;
 import org.apache.hadoop.ozone.client.OzoneClient;
@@ -51,30 +50,25 @@ import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
 import org.apache.hadoop.ozone.om.protocolPB.OmTransport;
 import org.apache.hadoop.util.DataChecksum;
 import org.apache.hadoop.util.Time;
-import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
-import jakarta.annotation.Nonnull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hdds.client.ReplicationFactor.ONE;
-import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType.CRC32;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Unit tests for ReplicatedFileChecksumHelper class.
@@ -103,9 +97,9 @@ public class TestReplicatedFileChecksumHelper {
 
       @Nonnull
       @Override
-      protected XceiverClientFactory createXceiverClientFactory(
+      protected ContainerApiManager createContainerApiManager(
           ServiceInfoEx serviceInfo) {
-        return new MockXceiverClientFactory();
+        return mock(ContainerApiManager.class);
       }
     };
 
@@ -175,7 +169,7 @@ public class TestReplicatedFileChecksumHelper {
 
     RpcClient mockRpcClient = mock(RpcClient.class);
 
-    List<DatanodeDetails> dns = Arrays.asList(
+    List<DatanodeDetails> dns = Collections.singletonList(
         DatanodeDetails.newBuilder().setUuid(UUID.randomUUID()).build());
     Pipeline pipeline;
     pipeline = Pipeline.newBuilder()
@@ -187,20 +181,12 @@ public class TestReplicatedFileChecksumHelper {
         .setNodes(dns)
         .build();
 
-    XceiverClientGrpc xceiverClientGrpc =
-        new XceiverClientGrpc(pipeline, conf) {
-          @Override
-          public XceiverClientReply sendCommandAsync(
-              ContainerProtos.ContainerCommandRequestProto request,
-              DatanodeDetails dn) {
-            return buildValidResponse();
-          }
-        };
-    XceiverClientFactory factory = mock(XceiverClientFactory.class);
-    when(factory.acquireClientForReadData(any())).
+    ContainerApi xceiverClientGrpc = mock(ContainerApi.class);
+    ContainerApiManager factory = mock(ContainerApiManager.class);
+    when(factory.acquireClient(any())).
         thenReturn(xceiverClientGrpc);
 
-    when(mockRpcClient.getXceiverClientManager()).thenReturn(factory);
+    when(mockRpcClient.getContainerApiManager()).thenReturn(factory);
 
     OzoneManagerProtocol om = mock(OzoneManagerProtocol.class);
     when(mockRpcClient.getOzoneManagerClient()).thenReturn(om);
@@ -212,7 +198,7 @@ public class TestReplicatedFileChecksumHelper {
             .build();
 
     List<OmKeyLocationInfo> omKeyLocationInfoList =
-        Arrays.asList(omKeyLocationInfo);
+        Collections.singletonList(omKeyLocationInfo);
 
     OmKeyInfo omKeyInfo = new OmKeyInfo.Builder()
         .setVolumeName(null)
@@ -276,54 +262,6 @@ public class TestReplicatedFileChecksumHelper {
     fileChecksum = helper.getFileChecksum();
     assertInstanceOf(MD5MD5CRC32GzipFileChecksum.class, fileChecksum);
     assertEquals(1, helper.getKeyLocationInfoList().size());
-  }
-
-  private XceiverClientReply buildValidResponse() {
-    // return a GetBlockResponse message of a block and its chunk checksums.
-    ContainerProtos.DatanodeBlockID blockID =
-        ContainerProtos.DatanodeBlockID.newBuilder()
-        .setContainerID(1)
-        .setLocalID(1)
-        .setBlockCommitSequenceId(1).build();
-
-    byte[] byteArray = new byte[10];
-    ByteString byteString = ByteString.copyFrom(byteArray);
-
-    ContainerProtos.ChecksumData checksumData =
-        ContainerProtos.ChecksumData.newBuilder()
-        .setType(CRC32)
-        .setBytesPerChecksum(1024)
-        .addChecksums(byteString)
-        .build();
-
-    ContainerProtos.ChunkInfo chunkInfo =
-        ContainerProtos.ChunkInfo.newBuilder()
-        .setChunkName("dummy_chunk")
-        .setOffset(1)
-        .setLen(10)
-        .setChecksumData(checksumData)
-        .build();
-
-    ContainerProtos.BlockData blockData =
-        ContainerProtos.BlockData.newBuilder()
-            .setBlockID(blockID)
-            .addChunks(chunkInfo)
-            .build();
-    ContainerProtos.GetBlockResponseProto getBlockResponseProto
-        = ContainerProtos.GetBlockResponseProto.newBuilder()
-        .setBlockData(blockData)
-        .build();
-
-    ContainerProtos.ContainerCommandResponseProto resp =
-        ContainerProtos.ContainerCommandResponseProto.newBuilder()
-            .setCmdType(ContainerProtos.Type.GetBlock)
-            .setResult(ContainerProtos.Result.SUCCESS)
-            .setGetBlock(getBlockResponseProto)
-            .build();
-    final CompletableFuture<ContainerProtos.ContainerCommandResponseProto>
-        replyFuture = new CompletableFuture<>();
-    replyFuture.complete(resp);
-    return new XceiverClientReply(replyFuture);
   }
 
   private OzoneBucket getOzoneBucket() throws IOException {

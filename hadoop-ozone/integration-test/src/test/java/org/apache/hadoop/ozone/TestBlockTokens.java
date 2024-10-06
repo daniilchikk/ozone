@@ -24,7 +24,7 @@ import org.apache.hadoop.hdds.conf.DefaultConfigManager;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
 import org.apache.hadoop.hdds.scm.ScmConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.server.SCMHTTPServerConfig;
 import org.apache.hadoop.hdds.security.symmetric.ManagedSecretKey;
@@ -62,7 +62,6 @@ import java.net.InetAddress;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
@@ -99,7 +98,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Integration test to verify block tokens in a secure cluster.
  */
 @InterfaceAudience.Private
-@Timeout(value = 180, unit = TimeUnit.SECONDS)
+@Timeout(value = 180)
 public final class TestBlockTokens {
   private static final Logger LOG = LoggerFactory.getLogger(TestBlockTokens.class);
   private static final String TEST_VOLUME = "testvolume";
@@ -116,10 +115,9 @@ public final class TestBlockTokens {
   private static File spnegoKeytab;
   private static File testUserKeytab;
   private static String testUserPrincipal;
-  private static String host;
   private static MiniOzoneHAClusterImpl cluster;
   private static OzoneClient client;
-  private static BlockInputStreamFactory blockInputStreamFactory =
+  private static final BlockInputStreamFactory blockInputStreamFactory =
       new BlockInputStreamFactoryImpl();
 
   @BeforeAll
@@ -144,7 +142,7 @@ public final class TestBlockTokens {
   private static void createTestData() throws IOException {
     client.getProxy().createVolume(TEST_VOLUME);
     client.getProxy().createBucket(TEST_VOLUME, TEST_BUCKET);
-    byte[] data = string2Bytes(RandomStringUtils.randomAlphanumeric(1024));
+    byte[] data = string2Bytes(RandomStringUtils.secure().nextAlphanumeric(1024));
     OzoneBucket bucket = client.getObjectStore().getVolume(TEST_VOLUME)
         .getBucket(TEST_BUCKET);
     try (OzoneOutputStream out = bucket.createKey(TEST_FILE, data.length)) {
@@ -255,7 +253,7 @@ public final class TestBlockTokens {
     for (OmKeyLocationInfoGroup v : keyInfo.getKeyLocationVersions()) {
       for (OmKeyLocationInfo l : v.getLocationList()) {
         Token<OzoneBlockTokenIdentifier> token = l.getToken();
-        byte[] randomPassword = RandomUtils.nextBytes(100);
+        byte[] randomPassword = RandomUtils.secure().randomBytes(100);
         Token<OzoneBlockTokenIdentifier> override = new Token<>(
             token.getIdentifier(), randomPassword,
             token.getKind(), token.getService());
@@ -294,12 +292,11 @@ public final class TestBlockTokens {
 
   private void readData(OmKeyInfo keyInfo,
       Function<OmKeyInfo, OmKeyInfo> retryFunc) throws IOException {
-    XceiverClientFactory xceiverClientManager =
-        ((RpcClient) client.getProxy()).getXceiverClientManager();
+    ContainerApiManager containerApiManager = ((RpcClient) client.getProxy()).getContainerApiManager();
     OzoneClientConfig clientConfig = conf.getObject(OzoneClientConfig.class);
     clientConfig.setChecksumVerify(false);
     try (InputStream is = KeyInputStream.getFromOmKeyInfo(keyInfo,
-        xceiverClientManager, retryFunc, blockInputStreamFactory,
+        containerApiManager, retryFunc, blockInputStreamFactory,
         clientConfig)) {
       byte[] buf = new byte[100];
       int readBytes = is.read(buf, 0, 100);
@@ -345,7 +342,7 @@ public final class TestBlockTokens {
 
   private static void setSecureConfig() throws IOException {
     conf.setBoolean(OZONE_SECURITY_ENABLED_KEY, true);
-    host = InetAddress.getLocalHost().getCanonicalHostName()
+    String host = InetAddress.getLocalHost().getCanonicalHostName()
         .toLowerCase();
 
     conf.set(HADOOP_SECURITY_AUTHENTICATION, KERBEROS.name());

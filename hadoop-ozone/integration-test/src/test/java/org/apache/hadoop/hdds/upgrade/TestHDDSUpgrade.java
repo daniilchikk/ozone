@@ -24,8 +24,9 @@ import org.apache.hadoop.hdds.client.ReplicationType;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.ContainerManager;
 import org.apache.hadoop.hdds.scm.exceptions.SCMException;
@@ -35,9 +36,11 @@ import org.apache.hadoop.hdds.scm.pipeline.PipelineManager;
 import org.apache.hadoop.hdds.scm.server.SCMConfigurator;
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
 import org.apache.hadoop.hdds.scm.server.upgrade.SCMUpgradeFinalizationContext;
-import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
-import org.apache.hadoop.ozone.*;
+import org.apache.hadoop.ozone.HddsDatanodeService;
+import org.apache.hadoop.ozone.MiniOzoneCluster;
+import org.apache.hadoop.ozone.MiniOzoneClusterProvider;
+import org.apache.hadoop.ozone.MiniOzoneHAClusterImpl;
+import org.apache.hadoop.ozone.UniformDatanodesFactory;
 import org.apache.hadoop.ozone.client.ObjectStore;
 import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.client.OzoneClientFactory;
@@ -52,7 +55,12 @@ import org.apache.hadoop.security.authentication.client.AuthenticationException;
 import org.apache.ozone.test.LambdaTestUtils;
 import org.apache.ozone.test.tag.Flaky;
 import org.apache.ozone.test.tag.Slow;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,12 +82,23 @@ import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Con
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.NodeState.HEALTHY;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.NodeState.HEALTHY_READONLY;
 import static org.apache.hadoop.hdds.scm.ScmConfig.ConfigStrings.HDDS_SCM_INIT_DEFAULT_LAYOUT_VERSION;
-import static org.apache.hadoop.hdds.scm.ScmConfigKeys.*;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_DATANODE_PIPELINE_LIMIT;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_HEARTBEAT_PROCESS_INTERVAL;
+import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_RATIS_PIPELINE_LIMIT;
 import static org.apache.hadoop.hdds.scm.pipeline.Pipeline.PipelineState.OPEN;
 import static org.apache.hadoop.ozone.om.OmUpgradeConfig.ConfigStrings.OZONE_OM_INIT_DEFAULT_LAYOUT_VERSION;
-import static org.apache.hadoop.ozone.upgrade.InjectedUpgradeFinalizationExecutor.UpgradeTestInjectionPoints.*;
-import static org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.Status.*;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.apache.hadoop.ozone.upgrade.InjectedUpgradeFinalizationExecutor.UpgradeTestInjectionPoints.AFTER_COMPLETE_FINALIZATION;
+import static org.apache.hadoop.ozone.upgrade.InjectedUpgradeFinalizationExecutor.UpgradeTestInjectionPoints.AFTER_POST_FINALIZE_UPGRADE;
+import static org.apache.hadoop.ozone.upgrade.InjectedUpgradeFinalizationExecutor.UpgradeTestInjectionPoints.AFTER_PRE_FINALIZE_UPGRADE;
+import static org.apache.hadoop.ozone.upgrade.InjectedUpgradeFinalizationExecutor.UpgradeTestInjectionPoints.BEFORE_PRE_FINALIZE_UPGRADE;
+import static org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.Status.ALREADY_FINALIZED;
+import static org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.Status.FINALIZATION_DONE;
+import static org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.Status.FINALIZATION_REQUIRED;
+import static org.apache.hadoop.ozone.upgrade.UpgradeFinalizer.Status.STARTING_FINALIZATION;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Test SCM and DataNode Upgrade sequence.
@@ -103,8 +122,7 @@ public class TestHDDSUpgrade {
   private ContainerManager scmContainerManager;
   private PipelineManager scmPipelineManager;
   private static final int NUM_CONTAINERS_CREATED = 1;
-  private HDDSLayoutVersionManager scmVersionManager;
-  private AtomicBoolean testPassed = new AtomicBoolean(true);
+  private final AtomicBoolean testPassed = new AtomicBoolean(true);
   private static
       InjectedUpgradeFinalizationExecutor<SCMUpgradeFinalizationContext>
       scmFinalizationExecutor;
@@ -190,7 +208,6 @@ public class TestHDDSUpgrade {
     scm = cluster.getStorageContainerManager();
     scmContainerManager = scm.getContainerManager();
     scmPipelineManager = scm.getPipelineManager();
-    scmVersionManager = scm.getLayoutVersionManager();
   }
 
 
@@ -217,7 +234,7 @@ public class TestHDDSUpgrade {
    * Helper function to test that we can create new pipelines Post-Upgrade.
    */
   private void testPostUpgradePipelineCreation()
-      throws IOException, TimeoutException {
+      throws IOException {
     Pipeline ratisPipeline1 = scmPipelineManager.createPipeline(RATIS_THREE);
     scmPipelineManager.openPipeline(ratisPipeline1.getId());
     assertEquals(0,
@@ -243,15 +260,12 @@ public class TestHDDSUpgrade {
    * Helper function for container creation.
    */
   private void createTestContainers() throws IOException {
-    XceiverClientManager xceiverClientManager = new XceiverClientManager(conf);
+    ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
     ContainerInfo ci1 = scmContainerManager.allocateContainer(RATIS_THREE, "Owner1");
     Pipeline ratisPipeline1 = scmPipelineManager.getPipeline(ci1.getPipelineID());
     scmPipelineManager.openPipeline(ratisPipeline1.getId());
-    XceiverClientSpi client1 = xceiverClientManager.acquireClient(ratisPipeline1);
-    try (ContainerApi containerClient = new ContainerApiImpl(client1, null)) {
-      containerClient.createContainer(ci1.getContainerID());
-    }
-    xceiverClientManager.releaseClient(client1, false);
+    ContainerApi client1 = containerApiManager.acquireClient(ratisPipeline1);
+    client1.createContainer(ci1.getContainerID());
   }
 
   /*
@@ -352,16 +366,13 @@ public class TestHDDSUpgrade {
     }
     // The ongoing current SCM Upgrade is getting aborted at this point. We
     // need to schedule a new SCM Upgrade on a different thread context.
-    Thread t = new Thread(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          loadSCMState();
-          scm.getFinalizationManager().finalizeUpgrade("xyz");
-        } catch (IOException e) {
-          e.printStackTrace();
-          testPassed.set(false);
-        }
+    Thread t = new Thread(() -> {
+      try {
+        loadSCMState();
+        scm.getFinalizationManager().finalizeUpgrade("xyz");
+      } catch (IOException e) {
+        e.printStackTrace();
+        testPassed.set(false);
       }
     });
     t.start();
@@ -421,17 +432,14 @@ public class TestHDDSUpgrade {
       // otherwise DataNode restart will hang. Also any cluster modification
       // needs to be guarded since it could get modified in multiple independent
       // threads.
-      t = new Thread(new Runnable() {
-        @Override
-        public void run() {
-          try {
-            synchronized (cluster) {
-              cluster.restartHddsDatanode(dn, true);
-            }
-          } catch (Exception e) {
-            e.printStackTrace();
-            testPassed.set(false);
+      t = new Thread(() -> {
+        try {
+          synchronized (cluster) {
+            cluster.restartHddsDatanode(dn, true);
           }
+        } catch (Exception e) {
+          e.printStackTrace();
+          testPassed.set(false);
         }
       });
     } catch (Exception e) {
@@ -451,34 +459,29 @@ public class TestHDDSUpgrade {
    * Executing-Thread-Context : Either the SCM-Upgrade-Finalizer or the
    *                            DataNode-Upgrade-Finalizer.
    */
-  private Thread injectSCMAndDataNodeFailureTogetherAtTheSameTime()
-      throws InterruptedException, TimeoutException, AuthenticationException,
-      IOException {
+  private Thread injectSCMAndDataNodeFailureTogetherAtTheSameTime() {
     // This needs to happen in a separate thread context otherwise
     // DataNode restart will hang.
-    return new Thread(new Runnable() {
-      @Override
-      public void run() {
-        try {
-          // Since we are modifying cluster in an independent thread context,
-          // we synchronize access to it to avoid concurrent modification
-          // exception.
-          synchronized (cluster) {
-            // Work on a Copy of current set of DataNodes to avoid
-            // running into tricky situations.
-            List<HddsDatanodeService> currentDataNodes =
-                new ArrayList<>(cluster.getHddsDatanodes());
-            for (HddsDatanodeService ds: currentDataNodes) {
-              DatanodeDetails dn = ds.getDatanodeDetails();
-              cluster.restartHddsDatanode(dn, false);
-            }
-            cluster.restartStorageContainerManager(false);
-            cluster.waitForClusterToBeReady();
+    return new Thread(() -> {
+      try {
+        // Since we are modifying cluster in an independent thread context,
+        // we synchronize access to it to avoid concurrent modification
+        // exception.
+        synchronized (cluster) {
+          // Work on a Copy of current set of DataNodes to avoid
+          // running into tricky situations.
+          List<HddsDatanodeService> currentDataNodes =
+              new ArrayList<>(cluster.getHddsDatanodes());
+          for (HddsDatanodeService ds: currentDataNodes) {
+            DatanodeDetails dn = ds.getDatanodeDetails();
+            cluster.restartHddsDatanode(dn, false);
           }
-        } catch (Exception e) {
-          e.printStackTrace();
-          testPassed.set(false);
+          cluster.restartStorageContainerManager(false);
+          cluster.waitForClusterToBeReady();
         }
+      } catch (Exception e) {
+        e.printStackTrace();
+        testPassed.set(false);
       }
     });
   }
@@ -540,7 +543,7 @@ public class TestHDDSUpgrade {
     testPassed.set(true);
     scmFinalizationExecutor.configureTestInjectionFunction(
         AFTER_COMPLETE_FINALIZATION,
-        () -> this.injectSCMFailureDuringSCMUpgrade());
+        this::injectSCMFailureDuringSCMUpgrade);
     testFinalizationWithFailureInjectionHelper(null);
     assertTrue(testPassed.get());
   }
@@ -559,7 +562,7 @@ public class TestHDDSUpgrade {
     testPassed.set(true);
     scmFinalizationExecutor.configureTestInjectionFunction(
         AFTER_POST_FINALIZE_UPGRADE,
-        () -> this.injectSCMFailureDuringSCMUpgrade());
+        this::injectSCMFailureDuringSCMUpgrade);
     testFinalizationWithFailureInjectionHelper(null);
     assertTrue(testPassed.get());
   }
@@ -703,9 +706,7 @@ public class TestHDDSUpgrade {
         UpgradeTestInjectionPoints.values()) {
       scmFinalizationExecutor.configureTestInjectionFunction(
           scmInjectionPoint,
-          () -> {
-            return this.injectSCMFailureDuringSCMUpgrade();
-          });
+          this::injectSCMFailureDuringSCMUpgrade);
 
       for (UpgradeTestInjectionPoints datanodeInjectionPoint :
           UpgradeTestInjectionPoints.values()) {

@@ -18,27 +18,22 @@
 
 package org.apache.hadoop.ozone.debug;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.HashSet;
-
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.hadoop.hdds.cli.SubcommandWithParent;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
-import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.client.ContainerMultinodeApi;
-import org.apache.hadoop.hdds.scm.client.ContainerMultinodeApiImpl;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.server.JsonUtils;
 import org.apache.hadoop.ozone.OzoneConsts;
 import org.apache.hadoop.ozone.client.OzoneClient;
@@ -53,6 +48,13 @@ import org.apache.hadoop.ozone.shell.keys.KeyHandler;
 import org.kohsuke.MetaInfServices;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
 
@@ -77,7 +79,7 @@ public class ChunkKeyHandler extends KeyHandler implements
   protected void execute(OzoneClient client, OzoneAddress address)
           throws IOException, OzoneClientException {
     try (ContainerOperationClient containerOperationClient = new ContainerOperationClient(parent.getOzoneConf());
-        XceiverClientManager xceiverClientManager = containerOperationClient.getXceiverClientManager()) {
+        ContainerApiManager containerApiManager = containerOperationClient.getContainerApiManager()) {
       OzoneManagerProtocol ozoneManagerClient = client.getObjectStore().getClientProxy().getOzoneManagerClient();
       address.ensureKeyAddress();
       ObjectNode result = JsonUtils.createObjectNode(null);
@@ -120,9 +122,8 @@ public class ChunkKeyHandler extends KeyHandler implements
         } else {
           pipeline = keyPipeline;
         }
-        XceiverClientSpi xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
-        try (ContainerMultinodeApi containerClient =
-                 new ContainerMultinodeApiImpl(xceiverClient, keyLocation.getToken())) {
+        ContainerMultinodeApi containerClient = containerApiManager.acquireMultinodeClient(pipeline);
+        try {
           // Datanode is queried to get chunk information.Thus querying the
           // OM,SCM and datanode helps us get chunk location information
           DatanodeBlockID datanodeBlockId = keyLocation.getBlockID().getDatanodeBlockIDProtobuf();
@@ -185,8 +186,6 @@ public class ChunkKeyHandler extends KeyHandler implements
           responseArrayList.add(responseFromAllNodes);
         } catch (InterruptedException e) {
           throw new RuntimeException(e);
-        } finally {
-          xceiverClientManager.releaseClientForReadData(xceiverClient, false);
         }
       }
       result.set("KeyLocations", responseArrayList);

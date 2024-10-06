@@ -17,21 +17,21 @@
  */
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.CONTAINER_NOT_FOUND;
 import static org.mockito.Mockito.mock;
@@ -45,7 +45,7 @@ final class DummyBlockInputStreamWithRetry
     extends DummyBlockInputStream {
 
   private int getChunkInfoCount = 0;
-  private IOException ioException;
+  private final IOException ioException;
 
   @SuppressWarnings("parameternumber")
   DummyBlockInputStreamWithRetry(
@@ -53,13 +53,13 @@ final class DummyBlockInputStreamWithRetry
       long blockLen,
       Pipeline pipeline,
       Token<OzoneBlockTokenIdentifier> token,
-      XceiverClientFactory xceiverClientManager,
+      ContainerApiManager containerApiManager,
       List<ChunkInfo> chunkList,
       Map<String, byte[]> chunkMap,
       AtomicBoolean isRerfreshed, IOException ioException,
       OzoneClientConfig config) throws IOException {
     super(blockId, blockLen, pipeline, token,
-        xceiverClientManager, blockID -> {
+        containerApiManager, blockID -> {
           isRerfreshed.set(true);
           try {
             BlockLocationInfo blockLocationInfo = mock(BlockLocationInfo.class);

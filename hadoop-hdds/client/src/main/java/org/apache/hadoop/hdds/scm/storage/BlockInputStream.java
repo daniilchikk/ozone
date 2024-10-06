@@ -25,12 +25,11 @@ import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.*;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi.Validator;
 import org.apache.hadoop.hdds.scm.client.ContainerApi;
-import org.apache.hadoop.hdds.scm.client.ContainerApiImpl;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.validator.ResponseValidatorFactory;
 import org.apache.hadoop.hdds.scm.container.common.helpers.StorageContainerException;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.security.exception.SCMSecurityException;
@@ -49,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -62,19 +62,14 @@ import static org.apache.hadoop.hdds.client.ReplicationConfig.getLegacyFactor;
  */
 public class BlockInputStream extends BlockExtendedInputStream {
 
-  public static final Logger LOG =
-      LoggerFactory.getLogger(BlockInputStream.class);
+  public static final Logger LOG = LoggerFactory.getLogger(BlockInputStream.class);
 
-  private final BlockID blockID;
+  private final BlockID blockId;
   private long length;
   private final BlockLocationInfo blockInfo;
-  private final AtomicReference<Pipeline> pipelineRef =
-      new AtomicReference<>();
-  private final AtomicReference<Token<OzoneBlockTokenIdentifier>> tokenRef =
-      new AtomicReference<>();
+  private final AtomicReference<Pipeline> pipelineRef = new AtomicReference<>();
+  private final AtomicReference<Token<OzoneBlockTokenIdentifier>> tokenRef = new AtomicReference<>();
   private final boolean verifyChecksum;
-  private XceiverClientFactory xceiverClientFactory;
-  private XceiverClientSpi xceiverClient;
   private boolean initialized = false;
   // TODO: do we need to change retrypolicy based on exception.
   private final RetryPolicy retryPolicy;
@@ -94,7 +89,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
   private long[] chunkOffsets = null;
 
   // Index of the chunkStream corresponding to the current position of the
-  // BlockInputStream i.e offset of the data to be read next from this block
+  // BlockInputStream i.e. offset of the data to be read next from this block
   private int chunkIndex;
 
   // Position of the BlockInputStream is maintained by this variable till
@@ -112,34 +107,39 @@ public class BlockInputStream extends BlockExtendedInputStream {
 
   private final Function<BlockID, BlockLocationInfo> refreshFunction;
 
+  private final ContainerApiManager containerApiManager;
+
+  private final AtomicBoolean closed = new AtomicBoolean(false);
+
   public BlockInputStream(
       BlockLocationInfo blockInfo,
       Pipeline pipeline,
       Token<OzoneBlockTokenIdentifier> token,
-      XceiverClientFactory xceiverClientFactory,
+      ContainerApiManager containerApiManager,
       Function<BlockID, BlockLocationInfo> refreshFunction,
-      OzoneClientConfig config) throws IOException {
+      OzoneClientConfig config
+  ) throws IOException {
     this.blockInfo = blockInfo;
-    this.blockID = blockInfo.getBlockID();
+    this.blockId = blockInfo.getBlockID();
     this.length = blockInfo.getLength();
     setPipeline(pipeline);
     tokenRef.set(token);
     this.verifyChecksum = config.isChecksumVerify();
-    this.xceiverClientFactory = xceiverClientFactory;
     this.refreshFunction = refreshFunction;
     this.retryPolicy =
         HddsClientUtils.createRetryPolicy(config.getMaxReadRetryCount(),
             TimeUnit.SECONDS.toMillis(config.getReadRetryInterval()));
+    this.containerApiManager = containerApiManager;
   }
 
   // only for unit tests
   public BlockInputStream(BlockID blockId, long blockLen, Pipeline pipeline,
                           Token<OzoneBlockTokenIdentifier> token,
-                          XceiverClientFactory xceiverClientFactory,
+                          ContainerApiManager containerApiManager,
                           OzoneClientConfig config
   ) throws IOException {
     this(new BlockLocationInfo(new BlockLocationInfo.Builder().setBlockID(blockId).setLength(blockLen)),
-        pipeline, token, xceiverClientFactory, null, config);
+        pipeline, token, containerApiManager, null, config);
   }
 
   /**
@@ -153,7 +153,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
       return;
     }
 
-    BlockData blockData = null;
+    BlockData blockData;
     List<ChunkInfo> chunks = null;
     IOException catchEx = null;
     do {
@@ -223,15 +223,15 @@ public class BlockInputStream extends BlockExtendedInputStream {
 
   private void refreshBlockInfo(IOException cause) throws IOException {
     LOG.info("Attempting to update pipeline and block token for block {} from pipeline {}: {}",
-        blockID, pipelineRef.get().getId(), cause.getMessage());
+        blockId, pipelineRef.get().getId(), cause.getMessage());
     if (refreshFunction != null) {
-      LOG.debug("Re-fetching pipeline and block token for block {}", blockID);
-      BlockLocationInfo blockLocationInfo = refreshFunction.apply(blockID);
+      LOG.debug("Re-fetching pipeline and block token for block {}", blockId);
+      BlockLocationInfo blockLocationInfo = refreshFunction.apply(blockId);
       if (blockLocationInfo == null) {
-        LOG.warn("No new block location info for block {}", blockID);
+        LOG.warn("No new block location info for block {}", blockId);
       } else {
         setPipeline(blockLocationInfo.getPipeline());
-        LOG.info("New pipeline for block {}: {}", blockID,
+        LOG.info("New pipeline for block {}: {}", blockId,
             blockLocationInfo.getPipeline());
 
         tokenRef.set(blockLocationInfo.getToken());
@@ -239,7 +239,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
           OzoneBlockTokenIdentifier tokenId = new OzoneBlockTokenIdentifier();
           tokenId.readFromByteArray(tokenRef.get().getIdentifier());
           LOG.info("A new token is added for block {}. Expiry: {}",
-              blockID, Instant.ofEpochMilli(tokenId.getExpiryDate()));
+              blockId, Instant.ofEpochMilli(tokenId.getExpiryDate()));
         }
       }
     } else {
@@ -252,40 +252,27 @@ public class BlockInputStream extends BlockExtendedInputStream {
    * @return BlockData.
    */
   protected BlockData getBlockData() throws IOException {
-    acquireClient();
-    try {
-      return getBlockDataUsingClient();
-    } finally {
-      releaseClient();
-    }
-  }
-
-  /**
-   * Send RPC call to get the block info from the container.
-   * @return BlockData.
-   */
-  protected BlockData getBlockDataUsingClient() throws IOException {
     Pipeline pipeline = pipelineRef.get();
+    ContainerApi containerClient = containerApiManager.acquireClient(pipeline);
+
     if (LOG.isDebugEnabled()) {
-      LOG.debug("Initializing BlockInputStream for get key to access block {}",
-          blockID);
+      LOG.debug("Initializing BlockInputStream for get key to access block {}", blockId);
     }
 
-    DatanodeBlockID.Builder blkIDBuilder =
-        DatanodeBlockID.newBuilder().setContainerID(blockID.getContainerID())
-            .setLocalID(blockID.getLocalID())
-            .setBlockCommitSequenceId(blockID.getBlockCommitSequenceId());
+    DatanodeBlockID.Builder blockIdBuilder =
+        DatanodeBlockID.newBuilder()
+            .setContainerID(blockId.getContainerID())
+            .setLocalID(blockId.getLocalID())
+            .setBlockCommitSequenceId(blockId.getBlockCommitSequenceId());
 
     int replicaIndex = pipeline.getReplicaIndex(pipeline.getClosestNode());
     if (replicaIndex > 0) {
-      blkIDBuilder.setReplicaIndex(replicaIndex);
+      blockIdBuilder.setReplicaIndex(replicaIndex);
     }
 
-    try (ContainerApi containerClient = new ContainerApiImpl(xceiverClient, tokenRef.get(), VALIDATORS)) {
-      GetBlockResponseProto response = containerClient.getBlock(blockID, pipeline.getReplicaIndexes());
+    GetBlockResponseProto response = containerClient.getBlock(blockId, pipeline.getReplicaIndexes());
 
-      return response.getBlockData();
-    }
+    return response.getBlockData();
   }
 
   private void setPipeline(Pipeline pipeline) throws IOException {
@@ -311,9 +298,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
     pipelineRef.set(readPipeline);
   }
 
-  private static final List<Validator> VALIDATORS
-      = ContainerProtocolCalls.toValidatorList(
-          (request, response) -> validate(response));
+  private static final List<Validator> VALIDATORS = ResponseValidatorFactory.createValidators((request, response) -> validate(response));
 
   private static void validate(ContainerCommandResponseProto response)
       throws IOException {
@@ -333,21 +318,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
         LOG.warn("The last chunk is empty for container/block {}/{} with an offset of the block length. " +
             "Likely due to HDDS-10682. This is safe to ignore.", blockID.getContainerID(), blockID.getLocalID());
       } else if (c.getLen() <= 0) {
-        throw new IOException("Failed to get chunkInfo["
-            + i + "]: len == " + c.getLen());
-      }
-    }
-  }
-
-  private void acquireClient() throws IOException {
-    if (xceiverClientFactory != null && xceiverClient == null) {
-      final Pipeline pipeline = pipelineRef.get();
-      try {
-        xceiverClient = xceiverClientFactory.acquireClientForReadData(pipeline);
-      } catch (IOException ioe) {
-        LOG.warn("Failed to acquire client for pipeline {}, block {}",
-            pipeline, blockID);
-        throw ioe;
+        throw new IOException("Failed to get chunkInfo[" + i + "]: len == " + c.getLen());
       }
     }
   }
@@ -362,8 +333,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
   }
 
   protected ChunkInputStream createChunkInputStream(ChunkInfo chunkInfo) {
-    return new ChunkInputStream(chunkInfo, blockID,
-        xceiverClientFactory, pipelineRef::get, verifyChecksum, tokenRef::get);
+    return new ChunkInputStream(chunkInfo, blockId, containerApiManager, pipelineRef::get, verifyChecksum, tokenRef::get);
   }
 
   @Override
@@ -379,7 +349,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
     int len = strategy.getTargetLength();
     while (len > 0) {
       // if we are at the last chunk and have read the entire chunk, return
-      if (chunkStreams.size() == 0 ||
+      if (chunkStreams.isEmpty() ||
           (chunkStreams.size() - 1 <= chunkIndex &&
               chunkStreams.get(chunkIndex)
                   .getRemaining() == 0)) {
@@ -410,8 +380,6 @@ public class BlockInputStream extends BlockExtendedInputStream {
         if (shouldRetryRead(ex)) {
           if (isConnectivityIssue(ex)) {
             handleReadError(ex);
-          } else {
-            current.releaseClient();
           }
           continue;
         } else {
@@ -471,7 +439,7 @@ public class BlockInputStream extends BlockExtendedInputStream {
         return;
       }
       throw new EOFException(
-          "EOF encountered at pos: " + pos + " for block: " + blockID);
+          "EOF encountered at pos: " + pos + " for block: " + blockId);
     }
 
     if (chunkIndex >= chunkStreams.size()) {
@@ -520,28 +488,20 @@ public class BlockInputStream extends BlockExtendedInputStream {
   }
 
   @Override
-  public boolean seekToNewSource(long targetPos) throws IOException {
+  public boolean seekToNewSource(long targetPos) {
     return false;
   }
 
   @Override
   public synchronized void close() {
-    releaseClient();
-    xceiverClientFactory = null;
-
     final List<ChunkInputStream> inputStreams = this.chunkStreams;
     if (inputStreams != null) {
       for (ChunkInputStream is : inputStreams) {
         is.close();
       }
     }
-  }
 
-  private void releaseClient() {
-    if (xceiverClientFactory != null && xceiverClient != null) {
-      xceiverClientFactory.releaseClientForReadData(xceiverClient, false);
-      xceiverClient = null;
-    }
+    closed.set(true);
   }
 
   /**
@@ -550,14 +510,14 @@ public class BlockInputStream extends BlockExtendedInputStream {
    * @throws IOException if stream is closed
    */
   protected synchronized void checkOpen() throws IOException {
-    if (xceiverClientFactory == null) {
+    if (!closed.get()) {
       throw new IOException("BlockInputStream has been closed.");
     }
   }
 
   @Override
   public BlockID getBlockID() {
-    return blockID;
+    return blockId;
   }
 
   @Override
@@ -578,7 +538,6 @@ public class BlockInputStream extends BlockExtendedInputStream {
   @Override
   public synchronized void unbuffer() {
     storePosition();
-    releaseClient();
 
     final List<ChunkInputStream> inputStreams = this.chunkStreams;
     if (inputStreams != null) {
@@ -618,14 +577,6 @@ public class BlockInputStream extends BlockExtendedInputStream {
   }
 
   private void handleReadError(IOException cause) throws IOException {
-    releaseClient();
-    final List<ChunkInputStream> inputStreams = this.chunkStreams;
-    if (inputStreams != null) {
-      for (ChunkInputStream is : inputStreams) {
-        is.releaseClient();
-      }
-    }
-
     refreshBlockInfo(cause);
   }
 

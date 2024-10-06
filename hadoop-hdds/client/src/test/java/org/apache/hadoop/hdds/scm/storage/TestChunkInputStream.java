@@ -18,24 +18,16 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
-import java.io.EOFException;
-import java.nio.ByteBuffer;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
-
 import org.apache.hadoop.hdds.client.BlockID;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChecksumType;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.scm.ByteStringConversion;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.pipeline.MockPipeline;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.common.Checksum;
-
 import org.apache.hadoop.ozone.common.ChunkBuffer;
 import org.apache.hadoop.security.token.Token;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
@@ -43,12 +35,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.io.EOFException;
+import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.hadoop.hdds.scm.protocolPB.ContainerCommandResponseBuilders.getReadChunkResponse;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.apache.hadoop.hdds.scm.protocolPB.ContainerCommandResponseBuilders.getReadChunkResponse;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -248,15 +247,13 @@ public class TestChunkInputStream {
     AtomicReference<Pipeline> pipelineRef = new AtomicReference<>(pipeline);
     AtomicReference<Token<?>> tokenRef = new AtomicReference<>(token);
 
-    XceiverClientFactory clientFactory = mock(XceiverClientFactory.class);
-    XceiverClientSpi client = mock(XceiverClientSpi.class);
-    when(clientFactory.acquireClientForReadData(any()))
+    ContainerApiManager clientFactory = mock(ContainerApiManager.class);
+    ContainerApi client = mock(ContainerApi.class);
+    when(clientFactory.acquireClient(any()))
         .thenReturn(client);
     ArgumentCaptor<ContainerCommandRequestProto> requestCaptor =
         ArgumentCaptor.forClass(ContainerCommandRequestProto.class);
-    when(client.getPipeline())
-        .thenAnswer(invocation -> pipelineRef.get());
-    when(client.sendCommand(requestCaptor.capture(), any()))
+    when(client.readChunk(any(), any()))
         .thenAnswer(invocation ->
             getReadChunkResponse(
                 requestCaptor.getValue(),
@@ -275,7 +272,7 @@ public class TestChunkInputStream {
       // THEN
       assertEquals(CHUNK_SIZE, read);
       assertArrayEquals(chunkData, buffer);
-      verify(clientFactory).acquireClientForReadData(newPipeline);
+      verify(clientFactory).acquireClient(newPipeline);
       verify(newToken).encodeToUrlString();
     }
   }

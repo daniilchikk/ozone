@@ -23,8 +23,8 @@ import org.apache.hadoop.fs.FSExceptionMessages;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.OzoneClientConfig;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
 import org.apache.hadoop.hdds.scm.container.ContainerID;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ExcludeList;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
@@ -45,7 +45,6 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Maintaining a list of BlockInputStream. Write based on offset.
@@ -59,7 +58,7 @@ import java.util.UUID;
 public class KeyDataStreamOutput extends AbstractDataStreamOutput
     implements KeyMetadataAware {
 
-  private OzoneClientConfig config;
+  private final OzoneClientConfig config;
 
   /**
    * Defines stream action while calling handleFlushOrClose.
@@ -80,7 +79,7 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
 
   private final BlockDataStreamOutputEntryPool blockDataStreamOutputEntryPool;
 
-  private long clientID;
+  private final long clientID;
 
   /**
    * Indicates if an atomic write is required. When set to true,
@@ -88,16 +87,11 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
    * A mismatch will prevent the commit from succeeding.
    * This is essential for operations like S3 put to ensure atomicity.
    */
-  private boolean atomicKeyCreation;
+  private final boolean atomicKeyCreation;
 
   @VisibleForTesting
   public List<BlockDataStreamOutputEntry> getStreamEntries() {
     return blockDataStreamOutputEntryPool.getStreamEntries();
-  }
-
-  @VisibleForTesting
-  public XceiverClientFactory getXceiverClientFactory() {
-    return blockDataStreamOutputEntryPool.getXceiverClientFactory();
   }
 
   @VisibleForTesting
@@ -114,11 +108,12 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
   public KeyDataStreamOutput(
       OzoneClientConfig config,
       OpenKeySession handler,
-      XceiverClientFactory xceiverClientManager,
-      OzoneManagerProtocol omClient, int chunkSize,
-      String requestId, ReplicationConfig replicationConfig,
-      String uploadID, int partNumber, boolean isMultipart,
-      boolean unsafeByteBufferConversion,
+      ContainerApiManager containerApiManager,
+      OzoneManagerProtocol omClient,
+      ReplicationConfig replicationConfig,
+      String uploadID,
+      int partNumber,
+      boolean isMultipart,
       boolean atomicKeyCreation
   ) {
     super(HddsClientUtils.getRetryPolicyByException(
@@ -129,11 +124,10 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
         new BlockDataStreamOutputEntryPool(
             config,
             omClient,
-            requestId, replicationConfig,
+            replicationConfig,
             uploadID, partNumber,
             isMultipart, info,
-            unsafeByteBufferConversion,
-            xceiverClientManager,
+            containerApiManager,
             handler.getId());
 
     // Retrieve the file encryption key info, null if file is not in
@@ -154,10 +148,9 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
    *
    * @param version the set of blocks that are pre-allocated.
    * @param openVersion the version corresponding to the pre-allocation.
-   * @throws IOException
    */
   public void addPreallocateBlocks(OmKeyLocationInfoGroup version,
-      long openVersion) throws IOException {
+      long openVersion) {
     blockDataStreamOutputEntryPool.addPreallocateBlocks(version, openVersion);
   }
 
@@ -268,7 +261,7 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
         try {
           BlockDataStreamOutput blockDataStreamOutput =
               (BlockDataStreamOutput) currentStreamEntry
-                  .getByteBufStreamOutput();
+                  .getByteBufferStreamOutput();
           blockDataStreamOutput.executePutBlock(false, false);
           blockDataStreamOutput.watchForCommit(false);
         } catch (IOException e) {
@@ -446,17 +439,13 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
    */
   public static class Builder {
     private OpenKeySession openHandler;
-    private XceiverClientFactory xceiverManager;
+    private ContainerApiManager containerApiManager;
     private OzoneManagerProtocol omClient;
-    private int chunkSize;
-    private final String requestID = UUID.randomUUID().toString();
     private String multipartUploadID;
     private int multipartNumber;
     private boolean isMultipartKey;
-    private boolean unsafeByteBufferConversion;
     private OzoneClientConfig clientConfig;
     private ReplicationConfig replicationConfig;
-    private boolean atomicKeyCreation = false;
 
     public Builder setMultipartUploadID(String uploadID) {
       this.multipartUploadID = uploadID;
@@ -473,18 +462,13 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
       return this;
     }
 
-    public Builder setXceiverClientManager(XceiverClientFactory manager) {
-      this.xceiverManager = manager;
+    public Builder setContainerApiManager(ContainerApiManager containerApiManager) {
+      this.containerApiManager = containerApiManager;
       return this;
     }
 
     public Builder setOmClient(OzoneManagerProtocol client) {
       this.omClient = client;
-      return this;
-    }
-
-    public Builder setChunkSize(int size) {
-      this.chunkSize = size;
       return this;
     }
 
@@ -498,35 +482,23 @@ public class KeyDataStreamOutput extends AbstractDataStreamOutput
       return this;
     }
 
-    public Builder enableUnsafeByteBufferConversion(boolean enabled) {
-      this.unsafeByteBufferConversion = enabled;
-      return this;
-    }
-
 
     public Builder setReplicationConfig(ReplicationConfig replConfig) {
       this.replicationConfig = replConfig;
       return this;
     }
 
-    public Builder setAtomicKeyCreation(boolean atomicKey) {
-      this.atomicKeyCreation = atomicKey;
-      return this;
-    }
-
     public KeyDataStreamOutput build() {
+      boolean atomicKeyCreation = false;
       return new KeyDataStreamOutput(
           clientConfig,
           openHandler,
-          xceiverManager,
+          containerApiManager,
           omClient,
-          chunkSize,
-          requestID,
           replicationConfig,
           multipartUploadID,
           multipartNumber,
           isMultipartKey,
-          unsafeByteBufferConversion,
           atomicKeyCreation);
     }
 
