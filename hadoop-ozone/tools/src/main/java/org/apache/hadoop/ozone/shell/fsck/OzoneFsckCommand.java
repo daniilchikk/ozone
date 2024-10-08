@@ -18,6 +18,15 @@
 
 package org.apache.hadoop.ozone.shell.fsck;
 
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.Writer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+import com.google.common.base.Strings;
+import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.cli.SubcommandWithParent;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
@@ -29,10 +38,6 @@ import org.apache.hadoop.ozone.shell.OzoneShell;
 import org.apache.hadoop.ozone.shell.Shell;
 import org.kohsuke.MetaInfServices;
 import picocli.CommandLine;
-
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.Writer;
 
 /**
  * The {@link OzoneFsckCommand} class is a command-line tool for performing file system checks within Ozone.
@@ -123,7 +128,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
 
     OzoneConfiguration ozoneConfiguration = getConf();
 
-    try (Writer writer = new PrintWriter(System.out);
+    try (Writer writer = createReportWriter(output);
          OzoneFsckHandler handler =
              new OzoneFsckHandler(address, verboseSettings, writer, delete, client, ozoneConfiguration)) {
       try {
@@ -134,6 +139,25 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
     } catch (Exception e) {
       throw new IOException("Can't execute fscheck command", e);
     }
+  }
+
+  private static Writer createReportWriter(@Nullable String output) throws IOException {
+    if (Strings.isNullOrEmpty(output)) {
+      return new PrintWriter(System.out);
+    }
+
+    Path outputPath = Paths.get(output);
+    Path parentFolder = outputPath.getParent();
+
+    if (!Files.exists(parentFolder)) {
+      Files.createDirectory(parentFolder);
+    }
+
+    if (!Files.isWritable(parentFolder) || Files.exists(outputPath) && !Files.isWritable(outputPath)) {
+      throw new IOException("Can't write to output file: " + output);
+    }
+
+    return Files.newBufferedWriter(outputPath);
   }
 
   @Override
