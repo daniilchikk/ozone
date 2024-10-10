@@ -18,6 +18,14 @@
 
 package org.apache.hadoop.ozone.container.keyvalue.scanner;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Objects;
+
 import jakarta.annotation.Nullable;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdfs.util.Canceler;
@@ -32,14 +40,6 @@ import org.apache.hadoop.ozone.container.keyvalue.KeyValueContainerData;
 import org.apache.hadoop.ozone.container.keyvalue.helpers.ChunkUtils;
 import org.apache.hadoop.util.DirectBufferPool;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Objects;
 
 import static org.apache.hadoop.hdds.StringUtils.bytes2Hex;
 import static org.apache.hadoop.ozone.container.common.impl.ContainerLayoutVersion.FILE_PER_BLOCK;
@@ -84,6 +84,8 @@ public class BlockScanner {
   public ScanResult scanBlock(BlockData block) {
     ContainerLayoutVersion layout = onDiskContainerData.getLayoutVersion();
 
+    boolean isFirstChunkNotEmpty = block.getChunks().get(0).getLen() > 0;
+
     for (ContainerProtos.ChunkInfo chunk : block.getChunks()) {
       Path chunkFile;
       try {
@@ -95,7 +97,7 @@ public class BlockScanner {
       if (!Files.exists(chunkFile)) {
         // In EC, a client may write empty putBlock in padding block nodes.
         // So, we need to make sure, chunk length > 0, before declaring the missing chunk file.
-        if (!block.getChunks().isEmpty() && block.getChunks().get(0).getLen() > 0) {
+        if (isFirstChunkNotEmpty) {
           return unhealthy(MISSING_CHUNK_FILE, chunkFile,
               new IOException("Missing chunk file " + chunkFile.toAbsolutePath()));
         }
