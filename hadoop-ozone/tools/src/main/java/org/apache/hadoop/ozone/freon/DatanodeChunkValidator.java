@@ -16,15 +16,17 @@
  */
 package org.apache.hadoop.ozone.freon;
 
+import java.io.IOException;
+import java.util.concurrent.Callable;
+
 import com.codahale.metrics.Timer;
 import org.apache.hadoop.hdds.cli.HddsVersionProvider;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
-import org.apache.hadoop.hdds.scm.XceiverClientFactory;
-import org.apache.hadoop.hdds.scm.XceiverClientManager;
-import org.apache.hadoop.hdds.scm.XceiverClientSpi;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadChunkResponseProto;
+import org.apache.hadoop.hdds.scm.client.ContainerApi;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManager;
+import org.apache.hadoop.hdds.scm.client.manager.ContainerApiManagerImpl;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.protocol.StorageContainerLocationProtocol;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
@@ -35,9 +37,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-
-import java.io.IOException;
-import java.util.concurrent.Callable;
 
 /**
  * Data validator of chunks to use pure datanode XCeiver interface.
@@ -55,8 +54,7 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
       LoggerFactory.getLogger(DatanodeChunkValidator.class);
 
   @Option(names = {"-l", "--pipeline"},
-          description = "Pipeline to use. By default the first RATIS/THREE "
-                  + "pipeline will be used.",
+          description = "Pipeline to use. By default the first RATIS/THREE pipeline will be used.",
           defaultValue = "")
   private String pipelineId;
 
@@ -65,14 +63,13 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
           defaultValue = "1024")
   private int chunkSize;
 
-  private XceiverClientSpi xceiverClient;
+  private ContainerApi containerClient;
 
   private Timer timer;
 
   private ChecksumData checksumReference;
 
   private Checksum checksum;
-  private ContainerProtos.ChecksumData checksumProtobuf;
 
 
   @Override
@@ -87,33 +84,21 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
       );
     }
 
-    try (StorageContainerLocationProtocol scmClient =
-                 createStorageContainerLocationClient(ozoneConf)) {
+    try (StorageContainerLocationProtocol scmClient = createStorageContainerLocationClient(ozoneConf)) {
       Pipeline pipeline = findPipelineForTest(pipelineId, scmClient, LOG);
 
-      try (XceiverClientFactory xceiverClientManager = new XceiverClientManager(ozoneConf)) {
-        xceiverClient = null;
+      ContainerApiManager containerApiManager = new ContainerApiManagerImpl();
 
-        checksumProtobuf = ContainerProtos.ChecksumData.newBuilder()
-            .setBytesPerChecksum(4)
-            .setType(ContainerProtos.ChecksumType.CRC32)
-            .build();
+      this.containerClient = containerApiManager.acquireClient(pipeline);
 
-        readReference();
+      readReference();
 
-        timer = getMetrics().timer("chunk-validate");
+      timer = getMetrics().timer("chunk-validate");
 
-        runTests(this::validateChunk);
+      runTests(this::validateChunk);
 
-        xceiverClientManager.releaseClientForReadData(xceiverClient, true);
-      }
-
-    } finally {
-      if (xceiverClient != null) {
-        xceiverClient.close();
-      }
+      return null;
     }
-    return null;
   }
 
   /**
@@ -121,31 +106,22 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
    * {@link org.apache.hadoop.ozone.freon.DatanodeChunkGenerator}.
    */
   private void readReference() throws IOException {
-    ContainerCommandRequestProto request = createReadChunkRequest(0);
-    ContainerCommandResponseProto response =
-        xceiverClient.sendCommand(request);
+    ReadChunkResponseProto response = containerClient.readChunk(null, null);
 
     checksum = new Checksum(ContainerProtos.ChecksumType.CRC32, chunkSize);
     checksumReference = computeChecksum(response);
   }
 
-
-  private void validateChunk(long stepNo) throws Exception {
-    ContainerCommandRequestProto request = createReadChunkRequest(stepNo);
-
+  private void validateChunk(long stepNo) {
     timer.time(() -> {
       try {
-        ContainerCommandResponseProto response =
-            xceiverClient.sendCommand(request);
+        ReadChunkResponseProto response = containerClient.readChunk(null, null);
 
         ChecksumData checksumOfChunk = computeChecksum(response);
 
         if (!checksumReference.equals(checksumOfChunk)) {
-          throw new IllegalStateException(
-              "Reference (=first) message checksum doesn't match " +
-                  "with checksum of chunk "
-                        + response.getReadChunk()
-                  .getChunkData().getChunkName());
+          throw new IllegalStateException("Reference (=first) message checksum doesn't match with checksum of chunk "
+              + response.getChunkData().getChunkName());
         }
       } catch (IOException e) {
         LOG.warn("Could not read chunk due to IOException: ", e);
@@ -154,50 +130,12 @@ public class DatanodeChunkValidator extends BaseFreonGenerator
 
   }
 
-  private ContainerCommandRequestProto createReadChunkRequest(long stepNo)
-      throws IOException {
-    ContainerProtos.DatanodeBlockID blockId =
-        ContainerProtos.DatanodeBlockID.newBuilder()
-            .setContainerID(1L)
-            .setLocalID(stepNo % 20)
-            .build();
-
-    ContainerProtos.ChunkInfo chunkInfo = ContainerProtos.ChunkInfo.newBuilder()
-            .setChunkName(getPrefix() + "_testdata_chunk_" + stepNo)
-            .setChecksumData(checksumProtobuf)
-            .setOffset((stepNo / 20) * chunkSize)
-            .setLen(chunkSize)
-            .build();
-
-    ContainerProtos.ReadChunkRequestProto.Builder readChunkRequest =
-        ContainerProtos.ReadChunkRequestProto
-            .newBuilder()
-            .setBlockID(blockId)
-            .setChunkData(chunkInfo);
-
-    String id = xceiverClient.getPipeline().getFirstNode().getUuidString();
-
-    ContainerCommandRequestProto.Builder builder =
-            ContainerCommandRequestProto
-                    .newBuilder()
-                    .setCmdType(ContainerProtos.Type.ReadChunk)
-                    .setContainerID(blockId.getContainerID())
-                    .setDatanodeUuid(id)
-                    .setReadChunk(readChunkRequest);
-
-    return builder.build();
-  }
-
-  private ChecksumData computeChecksum(ContainerCommandResponseProto response)
+  private ChecksumData computeChecksum(ReadChunkResponseProto response)
       throws OzoneChecksumException {
-    ContainerProtos.ReadChunkResponseProto readChunk = response.getReadChunk();
-    if (readChunk.hasData()) {
-      return checksum.computeChecksum(readChunk.getData().asReadOnlyByteBuffer());
+    if (response.hasData()) {
+      return checksum.computeChecksum(response.getData().asReadOnlyByteBuffer());
     } else {
-      return checksum.computeChecksum(
-          readChunk.getDataBuffers().getBuffersList());
+      return checksum.computeChecksum(response.getDataBuffers().getBuffersList());
     }
   }
-
-
 }

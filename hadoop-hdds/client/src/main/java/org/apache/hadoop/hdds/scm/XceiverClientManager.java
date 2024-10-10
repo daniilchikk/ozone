@@ -18,6 +18,9 @@
 
 package org.apache.hadoop.hdds.scm;
 
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
+
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
@@ -31,20 +34,15 @@ import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.ozone.OzoneConfigKeys;
 import org.apache.hadoop.ozone.OzoneSecurityUtil;
 import org.apache.hadoop.ozone.util.CacheMetrics;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.hadoop.hdds.conf.ConfigTag.OZONE;
 import static org.apache.hadoop.hdds.conf.ConfigTag.PERFORMANCE;
-import static org.apache.hadoop.hdds.scm.exceptions.SCMException.ResultCodes.NO_REPLICA_FOUND;
 
 /**
  * XceiverClientManager is responsible for the lifecycle of XceiverClient
@@ -72,8 +70,6 @@ public class XceiverClientManager implements XceiverClientFactory {
   private final ClientTrustManager trustManager;
 
   private final boolean securityEnabled;
-
-  private final boolean topologyAwareRead;
 
   /**
    * Creates a new XceiverClientManager for non secured ozone cluster.
@@ -117,9 +113,6 @@ public class XceiverClientManager implements XceiverClientFactory {
     if (securityEnabled) {
       Preconditions.checkNotNull(trustManager);
     }
-    this.topologyAwareRead = conf.getBoolean(
-        OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_KEY,
-        OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_DEFAULT);
   }
 
   protected XceiverClientSpi newClient(Pipeline pipeline) throws IOException {
@@ -148,50 +141,6 @@ public class XceiverClientManager implements XceiverClientFactory {
 
   public boolean isSecurityEnabled() {
     return securityEnabled;
-  }
-
-  /**
-   * {@inheritDoc}
-   *
-   * If there is already a cached XceiverClientSpi, simply return
-   * the cached otherwise create a new one.
-   */
-  @Override
-  public XceiverClientSpi acquireClient(Pipeline pipeline, boolean topologyAware) throws IOException {
-    Preconditions.checkNotNull(pipeline);
-    Preconditions.checkArgument(!pipeline.getNodes().isEmpty(), NO_REPLICA_FOUND);
-
-    synchronized (clientCache) {
-      XceiverClientSpi info = getClient(pipeline, topologyAware);
-      info.incrementReference();
-      return info;
-    }
-  }
-
-  @Override
-  public void releaseClient(XceiverClientSpi xceiverClient, boolean invalidateClient) {
-    releaseClient(xceiverClient, invalidateClient, false);
-  }
-
-  @Override
-  public void releaseClient(XceiverClientSpi client, boolean invalidateClient, boolean topologyAware) {
-    Preconditions.checkNotNull(client);
-    synchronized (clientCache) {
-      client.decrementReference();
-      if (invalidateClient) {
-        Pipeline pipeline = client.getPipeline();
-        String key = getPipelineCacheKey(pipeline, topologyAware);
-        XceiverClientSpi cachedClient = clientCache.getIfPresent(key);
-        if (cachedClient == client) {
-          clientCache.invalidate(key);
-        }
-      }
-    }
-  }
-
-  @Override
-  public void releaseClientForReadData(XceiverClientSpi xceiverClient, boolean invalidateClient) {
-    releaseClient(xceiverClient, invalidateClient, topologyAwareRead);
   }
 
   protected XceiverClientSpi getClient(Pipeline pipeline, boolean topologyAware)
