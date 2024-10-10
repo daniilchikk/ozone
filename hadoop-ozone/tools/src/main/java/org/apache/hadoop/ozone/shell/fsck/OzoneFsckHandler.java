@@ -18,11 +18,19 @@
 
 package org.apache.hadoop.ozone.shell.fsck;
 
+import java.io.IOException;
+import java.io.Writer;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockID;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
@@ -38,13 +46,6 @@ import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
-import org.apache.hadoop.ozone.shell.OzoneAddress;
-
-import java.io.IOException;
-import java.io.Writer;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.STAND_ALONE;
@@ -139,10 +140,13 @@ public class OzoneFsckHandler implements AutoCloseable {
 
     List<OmKeyLocationInfo> locations = keyInfo.getLatestVersionLocations().getBlocksLatestVersionOnly();
 
+    List<BlockID> damagedBlocks = new ArrayList<>();
+
     for (OmKeyLocationInfo location : locations) {
       Pipeline pipeline = getKeyPipeline(location.getPipeline());
 
       XceiverClientSpi xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
+
 
       try (ContainerMultinodeApi containerClient = new ContainerMultinodeApiImpl(xceiverClient)) {
         Map<DatanodeDetails, VerifyBlockResponseProto> responses = containerClient.verifyBlock(
@@ -152,11 +156,22 @@ public class OzoneFsckHandler implements AutoCloseable {
 
         for (VerifyBlockResponseProto response : responses.values()) {
           if (response.hasValid() && !response.getValid()) {
-            writer.write(String.format("Block %s is damaged", location.getBlockID()));
+            damagedBlocks.add(location.getBlockID().getProtobuf());
           }
         }
+
       } catch (Exception e) {
         throw new IOException("Can't sent request to Datanode.", e);
+      }
+    }
+
+    if (!damagedBlocks.isEmpty()) {
+      for (BlockID blockID : damagedBlocks) {
+        writer.write(String.format("Block %s is damaged", blockID));
+      }
+
+      if (deleteCorruptedKeys) {
+        omClient.deleteKey(keyArgs);
       }
     }
   }

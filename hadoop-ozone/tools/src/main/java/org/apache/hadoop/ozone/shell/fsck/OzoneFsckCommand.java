@@ -129,7 +129,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
     OzoneConfiguration ozoneConfiguration = getConf();
 
     try (Writer writer = createReportWriter(output);
-         OzoneFsckHandler handler = OzoneFsckHandler handler = new OzoneFsckHandler(
+         OzoneFsckHandler handler = new OzoneFsckHandler(
              volumePrefix,
              bucketPrefix,
              keyPrefix,
