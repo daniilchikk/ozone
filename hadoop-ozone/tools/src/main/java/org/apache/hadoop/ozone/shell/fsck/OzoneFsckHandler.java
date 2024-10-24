@@ -21,9 +21,11 @@ package org.apache.hadoop.ozone.shell.fsck;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
@@ -140,13 +142,12 @@ public class OzoneFsckHandler implements AutoCloseable {
 
     List<OmKeyLocationInfo> locations = keyInfo.getLatestVersionLocations().getBlocksLatestVersionOnly();
 
-    List<BlockID> damagedBlocks = new ArrayList<>();
+    Set<BlockID> damagedBlocks = new HashSet<>();
 
     for (OmKeyLocationInfo location : locations) {
       Pipeline pipeline = getKeyPipeline(location.getPipeline());
 
       XceiverClientSpi xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
-
 
       try (ContainerMultinodeApi containerClient = new ContainerMultinodeApiImpl(xceiverClient)) {
         Map<DatanodeDetails, VerifyBlockResponseProto> responses = containerClient.verifyBlock(
