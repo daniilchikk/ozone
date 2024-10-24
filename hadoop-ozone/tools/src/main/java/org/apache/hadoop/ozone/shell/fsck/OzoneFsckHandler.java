@@ -20,25 +20,33 @@ package org.apache.hadoop.ozone.shell.fsck;
 
 import java.io.IOException;
 import java.io.Writer;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
-import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockID;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.scm.cli.ContainerOperationClient;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.storage.ContainerMultinodeApi;
 import org.apache.hadoop.hdds.scm.storage.ContainerMultinodeApiImpl;
+import org.apache.hadoop.hdds.scm.storage.ContainerProtocolCalls;
+import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.ozone.client.OzoneBucket;
 import org.apache.hadoop.ozone.client.OzoneClient;
 import org.apache.hadoop.ozone.client.OzoneKey;
@@ -47,7 +55,9 @@ import org.apache.hadoop.ozone.om.helpers.KeyInfoWithVolumeContext;
 import org.apache.hadoop.ozone.om.helpers.OmKeyArgs;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
+import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
 import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
+import org.apache.hadoop.security.token.Token;
 
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.STAND_ALONE;
@@ -149,36 +159,119 @@ public class OzoneFsckHandler implements AutoCloseable {
 
       XceiverClientSpi xceiverClient = xceiverClientManager.acquireClientForReadData(pipeline);
 
+      BlockID blockID = location.getBlockID().getProtobuf();
+
       try (ContainerMultinodeApi containerClient = new ContainerMultinodeApiImpl(xceiverClient)) {
         Map<DatanodeDetails, VerifyBlockResponseProto> responses = containerClient.verifyBlock(
             location.getBlockID().getDatanodeBlockIDProtobuf(),
             location.getToken()
         );
 
-        for (VerifyBlockResponseProto response : responses.values()) {
-          if (response.hasValid() && !response.getValid()) {
-            damagedBlocks.add(location.getBlockID().getProtobuf());
+        if (responses.isEmpty()) {
+          damagedBlocks.add(blockID);
+        } else {
+          for (VerifyBlockResponseProto response : responses.values()) {
+            if (response.hasValid() && !response.getValid()) {
+              damagedBlocks.add(blockID);
+            }
+          }
+
+          if (!damagedBlocks.contains(blockID) && verboseSettings.printHealthyKeys()) {
+            printKeyInformation(keyInfo, Collections.emptySet(), xceiverClient);
           }
         }
 
+        if (!damagedBlocks.isEmpty()) {
+          printKeyInformation(keyInfo, damagedBlocks, xceiverClient);
+
+          if (deleteCorruptedKeys) {
+            omClient.deleteKey(keyArgs);
+          }
+        }
       } catch (Exception e) {
         throw new IOException("Can't sent request to Datanode.", e);
-      }
-    }
-
-    if (!damagedBlocks.isEmpty()) {
-      for (BlockID blockID : damagedBlocks) {
-        writer.write(String.format("Block %s is damaged", blockID));
-      }
-
-      if (deleteCorruptedKeys) {
-        omClient.deleteKey(keyArgs);
+      } finally {
+        xceiverClientManager.releaseClientForReadData(xceiverClient, false);
       }
     }
   }
 
+  // TODO: Desired output is JSON, so right now it is not paramount to have proper line separators in output.
+  private void printKeyInformation(OmKeyInfo keyInfo, Set<BlockID> damagedBlocks, XceiverClientSpi xceiverClient)
+      throws IOException {
+    boolean healthyKey = damagedBlocks.isEmpty();
+    if (!healthyKey || verboseSettings.printHealthyKeys()) {
+      writer.write(String.format("Key '%s' checked", keyInfo.getKeyName()));
+
+      if (healthyKey) {
+        writer.write("Key is healthy");
+      } else {
+        writer.write("Key is unhealthy");
+      }
+
+      for (BlockID blockID : damagedBlocks) {
+        writer.write(String.format("Block %s is damaged", blockID));
+      }
+
+      printKeyDetails(keyInfo, xceiverClient);
+
+      writer.write("\n");
+      writer.flush();
+    }
+  }
+
+  private void printKeyDetails(OmKeyInfo keyInfo, XceiverClientSpi xceiverClient) throws IOException {
+    if (verboseSettings.printContainers()) {
+      OmKeyLocationInfoGroup locationInfoGroup = Objects.requireNonNull(keyInfo.getLatestVersionLocations());
+
+      Map<Long, List<OmKeyLocationInfo>> containersAndBlocks = locationInfoGroup.getBlocksLatestVersionOnly().stream()
+          .collect(Collectors.groupingBy(OmKeyLocationInfo::getContainerID, Collectors.toList()));
+
+      for (Map.Entry<Long, List<OmKeyLocationInfo>> container : containersAndBlocks.entrySet()) {
+        writer.write("Container " + container.getKey());
+
+        if (verboseSettings.printBlocks()) {
+          for (OmKeyLocationInfo locationInfo : container.getValue()) {
+            writer.write(String.format("Block %s", locationInfo.toString()));
+
+            if (verboseSettings.printChunks()) {
+              List<ChunkInfo> chunkList = getChunksForLocation(locationInfo, xceiverClient);
+
+              for (ChunkInfo chunk : chunkList) {
+                writer.write(String.format("Chunk %s", chunk.toString()));
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  protected List<ContainerProtos.ChunkInfo> getChunksForLocation(OmKeyLocationInfo keyLocationInfo,
+      XceiverClientSpi xceiverClient) throws IOException {
+
+    Token<OzoneBlockTokenIdentifier> token = keyLocationInfo.getToken();
+    Pipeline pipeline = keyLocationInfo.getPipeline();
+
+    if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+      pipeline = Pipeline.newBuilder(pipeline)
+          .setReplicationConfig(StandaloneReplicationConfig
+              .getInstance(ReplicationConfig.getLegacyFactor(pipeline.getReplicationConfig())))
+          .build();
+    }
+
+    GetBlockResponseProto response = ContainerProtocolCalls.getBlock(
+        xceiverClient,
+        keyLocationInfo.getBlockID(),
+        token,
+        pipeline.getReplicaIndexes()
+    );
+
+    return response.getBlockData().getChunksList();
+  }
+
   private Pipeline getKeyPipeline(Pipeline keyPipeline) {
-    boolean isECKey = keyPipeline.getReplicationConfig().getReplicationType() == HddsProtos.ReplicationType.EC;
+    boolean isECKey = keyPipeline.getReplicationConfig().getReplicationType() == ReplicationType.EC;
     if (!isECKey && keyPipeline.getType() != STAND_ALONE) {
       return Pipeline.newBuilder(keyPipeline)
           .setReplicationConfig(StandaloneReplicationConfig.getInstance(ONE))

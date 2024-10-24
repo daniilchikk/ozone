@@ -88,21 +88,15 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
       description = "Specifies whether to display information about good and healthy keys")
   private boolean keys;
 
-  @CommandLine.Option(names = {"--containers"},
-      description = "Specifies whether to include information about containers")
-  private boolean containers;
-
-  @CommandLine.Option(names = {"--blocks"},
-      description = "Specifies whether to include information about blocks")
-  private boolean blocks;
-
-  @CommandLine.Option(names = {"--chunks"},
-      description = "Specifies whether to include information about chunks")
-  private boolean chunks;
-
-  @CommandLine.Option(names = {"--verbose", "-v"},
-      description = "Full verbose output; ignores --keys, --containers, --blocks, --chunks options")
-  private boolean verbose;
+  @CommandLine.Option(names = {"--verbosity-level"},
+      description = "Controls a verbosity of the presented output."
+          + " By default printed information only about a key itself."
+          + " Possible values: KEY, CONTAINER, BLOCK, CHUNK.\n"
+          + " - KEY: prints information about a key itself only.\n"
+          + " - CONTAINER: additionally prints information about key's containers.\n"
+          + " - BLOCK: additionally prints information about container's blocks.\n"
+          + " - CHUNK: prints information about block's chunk.\n")
+  private OzoneFsckVerbosityLevel verbose;
 
   @CommandLine.Option(names = {"--output", "-o"},
       description = "Specifies the file to output information about the scan process."
@@ -124,7 +118,10 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
 
   @Override
   protected void execute(OzoneClient client, OzoneAddress address) throws IOException, OzoneClientException {
-    OzoneFsckVerboseSettings verboseSettings = new OzoneFsckVerboseSettings();
+    OzoneFsckVerboseSettings verboseSettings = OzoneFsckVerboseSettings.builder()
+        .printHealthyKeys(keys)
+        .level(verbose)
+        .build();
 
     OzoneConfiguration ozoneConfiguration = getConf();
 
