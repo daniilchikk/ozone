@@ -18,6 +18,24 @@
 
 package org.apache.hadoop.ozone.container.keyvalue;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FilenameFilter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.locks.Lock;
+import java.util.function.Function;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.Striped;
@@ -83,24 +101,6 @@ import org.apache.ratis.statemachine.StateMachine;
 import org.apache.ratis.thirdparty.com.google.protobuf.ByteString;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FilenameFilter;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.locks.Lock;
-import java.util.function.Function;
 
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto.State.RECOVERING;
 import static org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.Result.CHUNK_FILE_INCONSISTENCY;
@@ -1367,12 +1367,11 @@ public class KeyValueHandler extends Handler {
     }
 
     BlockID blockID = BlockID.getFromProtobuf(request.getVerifyBlock().getBlockID());
-    if (replicaIndexCheckRequired(request)) {
-      try {
-        BlockUtils.verifyReplicaIdx(kvContainer, blockID);
-      } catch (IOException e) {
-        return unhealthyBlockResult(CORRUPT_CONTAINER_FILE);
-      }
+    // TODO: Verify necessity of this call and if need surround it with if like it was before.
+    try {
+      BlockUtils.verifyReplicaIdx(kvContainer, blockID);
+    } catch (IOException e) {
+      return unhealthyBlockResult(CORRUPT_CONTAINER_FILE);
     }
 
     BlockData block;

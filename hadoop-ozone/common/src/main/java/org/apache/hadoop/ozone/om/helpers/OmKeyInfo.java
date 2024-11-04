@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.ozone.om.helpers;
 
+import jakarta.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -196,9 +197,8 @@ public final class OmKeyInfo extends WithParentObjectId
     return getUpdateID();
   }
 
-  public synchronized OmKeyLocationInfoGroup getLatestVersionLocations() {
-    return keyLocationVersions.size() == 0 ? null :
-        keyLocationVersions.get(keyLocationVersions.size() - 1);
+  public @Nullable synchronized OmKeyLocationInfoGroup getLatestVersionLocations() {
+    return keyLocationVersions.isEmpty() ? null : keyLocationVersions.get(keyLocationVersions.size() - 1);
   }
 
   public List<OmKeyLocationInfoGroup> getKeyLocationVersions() {
