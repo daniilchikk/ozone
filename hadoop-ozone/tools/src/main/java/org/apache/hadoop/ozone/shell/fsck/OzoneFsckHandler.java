@@ -18,8 +18,10 @@
 
 package org.apache.hadoop.ozone.shell.fsck;
 
+import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
+import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.STAND_ALONE;
+
 import java.io.IOException;
-import java.io.Writer;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -27,15 +29,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
-
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.client.StandaloneReplicationConfig;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
-import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerDataProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.GetBlockResponseProto;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ReadContainerResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBlockResponseProto;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockID;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType;
@@ -57,10 +59,8 @@ import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfoGroup;
 import org.apache.hadoop.ozone.om.protocol.OzoneManagerProtocol;
+import org.apache.hadoop.ozone.shell.fsck.writer.OzoneFsckWriter;
 import org.apache.hadoop.security.token.Token;
-
-import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
-import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.STAND_ALONE;
 
 /**
  * OzoneFsckHandler is responsible for checking the integrity of keys in an Ozone filesystem.
@@ -68,15 +68,11 @@ import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.S
  */
 public class OzoneFsckHandler implements AutoCloseable {
 
-  private final String volumePrefix;
+  private final OzoneFsckPathPrefix pathPrefix;
 
-  private final String bucketPrefix;
-
-  private final String keyPrefix;
+  private final OzoneFsckWriter writer;
 
   private final OzoneFsckVerboseSettings verboseSettings;
-
-  private final Writer writer;
 
   private final boolean deleteCorruptedKeys;
 
@@ -89,20 +85,16 @@ public class OzoneFsckHandler implements AutoCloseable {
   private final XceiverClientManager xceiverClientManager;
 
   public OzoneFsckHandler(
-      String volumePrefix,
-      String bucketPrefix,
-      String keyPrefix,
+      OzoneFsckPathPrefix pathPrefix,
+      OzoneFsckWriter writer,
       OzoneFsckVerboseSettings verboseSettings,
-      Writer writer,
       boolean deleteCorruptedKeys,
       OzoneClient client,
       OzoneConfiguration ozoneConfiguration
   ) throws IOException {
-    this.volumePrefix = volumePrefix;
-    this.bucketPrefix = bucketPrefix;
-    this.keyPrefix = keyPrefix;
-    this.verboseSettings = verboseSettings;
+    this.pathPrefix = pathPrefix;
     this.writer = writer;
+    this.verboseSettings = verboseSettings;
     this.deleteCorruptedKeys = deleteCorruptedKeys;
     this.client = client;
     this.omClient = client.getObjectStore().getClientProxy().getOzoneManagerClient();
@@ -120,7 +112,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanVolumes() throws IOException {
-    Iterator<? extends OzoneVolume> volumes = client.getObjectStore().listVolumes(volumePrefix);
+    Iterator<? extends OzoneVolume> volumes = client.getObjectStore().listVolumes(pathPrefix.volume());
 
     while (volumes.hasNext()) {
       scanBuckets(volumes.next());
@@ -128,7 +120,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanBuckets(OzoneVolume volume) throws IOException {
-    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(bucketPrefix);
+    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.container());
 
     while (buckets.hasNext()) {
       scanKeys(buckets.next());
@@ -136,7 +128,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanKeys(OzoneBucket bucket) throws IOException {
-    Iterator<? extends OzoneKey> keys = bucket.listKeys(keyPrefix);
+    Iterator<? extends OzoneKey> keys = bucket.listKeys(pathPrefix.key());
 
     while (keys.hasNext()) {
       scanKey(keys.next());
@@ -150,7 +142,14 @@ public class OzoneFsckHandler implements AutoCloseable {
 
     OmKeyInfo keyInfo = keyInfoWithContext.getKeyInfo();
 
-    List<OmKeyLocationInfo> locations = keyInfo.getLatestVersionLocations().getBlocksLatestVersionOnly();
+    OmKeyLocationInfoGroup latestKeyInfo = keyInfo.getLatestVersionLocations();
+
+    if (latestKeyInfo == null) {
+      writer.writeCorruptedKey(keyInfo);
+      return;
+    }
+
+    List<OmKeyLocationInfo> locations = latestKeyInfo.getBlocksLatestVersionOnly();
 
     Set<BlockID> damagedBlocks = new HashSet<>();
 
@@ -173,6 +172,7 @@ public class OzoneFsckHandler implements AutoCloseable {
           for (VerifyBlockResponseProto response : responses.values()) {
             if (response.hasValid() && !response.getValid()) {
               damagedBlocks.add(blockID);
+              break;
             }
           }
 
@@ -196,49 +196,55 @@ public class OzoneFsckHandler implements AutoCloseable {
     }
   }
 
-  // TODO: Desired output is JSON, so right now it is not paramount to have proper line separators in output.
   private void printKeyInformation(OmKeyInfo keyInfo, Set<BlockID> damagedBlocks, XceiverClientSpi xceiverClient)
-      throws IOException {
+      throws IOException, InterruptedException {
     boolean healthyKey = damagedBlocks.isEmpty();
     if (!healthyKey || verboseSettings.printHealthyKeys()) {
-      writer.write(String.format("Key '%s' checked", keyInfo.getKeyName()));
+      writer.writeKeyInfo(keyInfo);
 
-      if (healthyKey) {
-        writer.write("Key is healthy");
-      } else {
-        writer.write("Key is unhealthy");
-      }
-
-      for (BlockID blockID : damagedBlocks) {
-        writer.write(String.format("Block %s is damaged", blockID));
-      }
+      writer.writeDamagedBlocks(damagedBlocks);
 
       printKeyDetails(keyInfo, xceiverClient);
-
-      writer.write("\n");
-      writer.flush();
     }
   }
 
-  private void printKeyDetails(OmKeyInfo keyInfo, XceiverClientSpi xceiverClient) throws IOException {
+  private void printKeyDetails(OmKeyInfo keyInfo, XceiverClientSpi xceiverClient)
+      throws IOException, InterruptedException {
     if (verboseSettings.printContainers()) {
       OmKeyLocationInfoGroup locationInfoGroup = Objects.requireNonNull(keyInfo.getLatestVersionLocations());
 
-      Map<Long, List<OmKeyLocationInfo>> containersAndBlocks = locationInfoGroup.getBlocksLatestVersionOnly().stream()
-          .collect(Collectors.groupingBy(OmKeyLocationInfo::getContainerID, Collectors.toList()));
+      for (OmKeyLocationInfo locationInfo : locationInfoGroup.getBlocksLatestVersionOnly()) {
+        Pipeline pipeline = locationInfo.getPipeline();
 
-      for (Map.Entry<Long, List<OmKeyLocationInfo>> container : containersAndBlocks.entrySet()) {
-        writer.write("Container " + container.getKey());
+        if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+          pipeline = Pipeline.newBuilder(pipeline)
+              .setReplicationConfig(
+                  StandaloneReplicationConfig.getInstance(
+                      ReplicationConfig.getLegacyFactor(pipeline.getReplicationConfig())))
+              .build();
+        }
 
-        if (verboseSettings.printBlocks()) {
-          for (OmKeyLocationInfo locationInfo : container.getValue()) {
-            writer.write(String.format("Block %s", locationInfo.toString()));
+        writer.writeLocationInfo(locationInfo);
+
+        Map<DatanodeDetails, ReadContainerResponseProto> readContainerResponses =
+            containerOperationClient.readContainerFromAllNodes(locationInfo.getContainerID(), pipeline);
+
+        for (Map.Entry<DatanodeDetails, ReadContainerResponseProto> entry : readContainerResponses.entrySet()) {
+          ContainerDataProto containerInfo = entry.getValue().getContainerData();
+          DatanodeDetails datanodeDetails = entry.getKey();
+
+          writer.writeContainerInfo(containerInfo, datanodeDetails);
+
+          if (verboseSettings.printBlocks()) {
+            BlockData blockInfo = getChunksForLocation(locationInfo, xceiverClient);
+
+            writer.writeBlockInfo(blockInfo);
 
             if (verboseSettings.printChunks()) {
-              List<ChunkInfo> chunkList = getChunksForLocation(locationInfo, xceiverClient);
+              List<ChunkInfo> chunkList = blockInfo.getChunksList();
 
               for (ChunkInfo chunk : chunkList) {
-                writer.write(String.format("Chunk %s", chunk.toString()));
+                writer.writeChunkInfo(chunk);
               }
             }
           }
@@ -247,9 +253,8 @@ public class OzoneFsckHandler implements AutoCloseable {
     }
   }
 
-  protected List<ContainerProtos.ChunkInfo> getChunksForLocation(OmKeyLocationInfo keyLocationInfo,
-      XceiverClientSpi xceiverClient) throws IOException {
-
+  protected BlockData getChunksForLocation(OmKeyLocationInfo keyLocationInfo, XceiverClientSpi xceiverClient)
+      throws IOException {
     Token<OzoneBlockTokenIdentifier> token = keyLocationInfo.getToken();
     Pipeline pipeline = keyLocationInfo.getPipeline();
 
@@ -267,7 +272,7 @@ public class OzoneFsckHandler implements AutoCloseable {
         pipeline.getReplicaIndexes()
     );
 
-    return response.getBlockData().getChunksList();
+    return response.getBlockData();
   }
 
   private Pipeline getKeyPipeline(Pipeline keyPipeline) {

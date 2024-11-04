@@ -18,6 +18,10 @@
 
 package org.apache.hadoop.hdds.scm.storage;
 
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
@@ -26,10 +30,6 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.VerifyBloc
 import org.apache.hadoop.hdds.scm.XceiverClientSpi;
 import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.security.token.Token;
-
-import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Implementation of the {@link ContainerMultinodeApi} interface.
@@ -63,6 +63,6 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
 
   @Override
   public void close() throws IOException {
-    client.close();
+    //client.close();
   }
 }
