@@ -16,18 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.ozone.shell.fsck;
+package org.apache.hadoop.ozone.shell.fsck.writer;
 
 /**
- * Presents available options for the output format of the Ozone File System Check (fscheck) operation.
+ * Represents the type of key in the Ozone filesystem.
+ * This enum differentiates between a regular file and a directory.
  */
-public enum OzoneFsckOutputFormat {
-  PLAIN_TEXT,
-  JSON,
-  XML;
-
-  /** Returns a default option for the output format of the Ozone File System Check (fscheck) operation. */
-  public static OzoneFsckOutputFormat getDefault() {
-    return JSON;
-  }
+public enum KeyType {
+  FILE,
+  DIRECTORY
 }

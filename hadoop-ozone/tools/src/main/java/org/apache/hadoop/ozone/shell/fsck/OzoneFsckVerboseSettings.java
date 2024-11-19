@@ -36,42 +36,87 @@ public final class OzoneFsckVerboseSettings {
     this.level = level;
   }
 
+  /**
+   * Indicates whether healthy keys should be printed during the Ozone File System Check (fscheck) operation.
+   *
+   * @return {@code true} if healthy keys should be printed; {@code false} otherwise.
+   */
   public boolean printHealthyKeys() {
     return printHealthyKeys;
   }
 
+  /**
+   * Indicates whether containers should be printed during the Ozone File System Check (fscheck) operation.
+   *
+   * @return {@code true} if containers should be printed based on the verbosity level; {@code false} otherwise.
+   */
   public boolean printContainers() {
     return level.applicable(CONTAINER);
   }
 
+  /**
+   * Indicates whether blocks should be printed during the Ozone File System Check (fscheck) operation.
+   *
+   * @return {@code true} if blocks should be printed based on the verbosity level; {@code false} otherwise.
+   */
   public boolean printBlocks() {
     return level.applicable(BLOCK);
   }
 
+  /**
+   * Indicates whether chunks should be printed during the Ozone File System Check (fscheck) operation.
+   *
+   * @return {@code true} if chunks should be printed based on the verbosity level; {@code false} otherwise.
+   */
   public boolean printChunks() {
     return level.applicable(CHUNK);
   }
 
+  /**
+   * Creates a new instance of the {@link SettingsBuilder} for configuring {@link OzoneFsckVerboseSettings}.
+   *
+   * @return a new instance of {@link SettingsBuilder}.
+   */
   public static SettingsBuilder builder() {
     return new SettingsBuilder();
   }
 
+  /**
+   * A builder class used to configure and create instances of {@link OzoneFsckVerboseSettings}.
+   * It allows setting the verbosity level and options
+   * to control the output of the Ozone File System Check (fscheck) operation.
+   */
   public static class SettingsBuilder {
     private boolean printKeys;
 
     private OzoneFsckVerbosityLevel level;
 
+    /**
+     * Sets whether healthy keys should be printed during the Ozone File System Check (fscheck) operation.
+     *
+     * @param printHealthyKeys a boolean indicating whether healthy keys should be printed.
+     */
     public SettingsBuilder printHealthyKeys(boolean printHealthyKeys) {
       this.printKeys = printHealthyKeys;
 
       return this;
     }
 
+    /**
+     * Sets the verbosity level for the Ozone File System Check (fscheck) operation.
+     *
+     * @param level the desired verbosity level.
+     */
     public SettingsBuilder level(OzoneFsckVerbosityLevel level) {
       this.level = level;
 
       return this;
     }
+
+    /**
+     * Builds and returns an instance of {@link OzoneFsckVerboseSettings}
+     * configured with the current settings in the {@link SettingsBuilder}.
+     */
     public OzoneFsckVerboseSettings build() {
       return new OzoneFsckVerboseSettings(printKeys, level);
     }

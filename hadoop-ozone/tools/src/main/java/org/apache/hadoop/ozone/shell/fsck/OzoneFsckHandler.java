@@ -64,7 +64,7 @@ import org.apache.hadoop.security.token.Token;
 
 /**
  * OzoneFsckHandler is responsible for checking the integrity of keys in an Ozone filesystem.
- * It traverses volumes, buckets, and keys to detect and optionally delete corrupted keys.
+ * It traverses volumes, buckets, and keys to detect and optionally to delete corrupted keys.
  */
 public class OzoneFsckHandler implements AutoCloseable {
 
@@ -84,6 +84,13 @@ public class OzoneFsckHandler implements AutoCloseable {
 
   private final XceiverClientManager xceiverClientManager;
 
+  /**
+   * Constructs an OzoneFsckHandler that is used
+   * to perform the Ozone File System Check (fscheck) operation in the Ozone filesystem.
+   *
+   * @throws IOException thrown in case {@link XceiverClientManager} instance can't be acquired
+   * or {@link ContainerOperationClient} can't be instantiated with provided Ozone configuration.
+   */
   public OzoneFsckHandler(
       OzoneFsckPathPrefix pathPrefix,
       OzoneFsckWriter writer,
@@ -197,19 +204,18 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void printKeyInformation(OmKeyInfo keyInfo, Set<BlockID> damagedBlocks, XceiverClientSpi xceiverClient)
-      throws IOException, InterruptedException {
+      throws IOException {
     boolean healthyKey = damagedBlocks.isEmpty();
     if (!healthyKey || verboseSettings.printHealthyKeys()) {
-      writer.writeKeyInfo(keyInfo);
+      writer.writeKeyInfo(keyInfo, () -> {
+        writer.writeDamagedBlocks(damagedBlocks);
 
-      writer.writeDamagedBlocks(damagedBlocks);
-
-      printKeyDetails(keyInfo, xceiverClient);
+        printKeyDetails(keyInfo, xceiverClient);
+      });
     }
   }
 
-  private void printKeyDetails(OmKeyInfo keyInfo, XceiverClientSpi xceiverClient)
-      throws IOException, InterruptedException {
+  private void printKeyDetails(OmKeyInfo keyInfo, XceiverClientSpi xceiverClient) throws IOException {
     if (verboseSettings.printContainers()) {
       OmKeyLocationInfoGroup locationInfoGroup = Objects.requireNonNull(keyInfo.getLatestVersionLocations());
 
@@ -227,33 +233,49 @@ public class OzoneFsckHandler implements AutoCloseable {
         writer.writeLocationInfo(locationInfo);
 
         Map<DatanodeDetails, ReadContainerResponseProto> readContainerResponses =
-            containerOperationClient.readContainerFromAllNodes(locationInfo.getContainerID(), pipeline);
+            readContainerInfos(locationInfo, pipeline);
 
         for (Map.Entry<DatanodeDetails, ReadContainerResponseProto> entry : readContainerResponses.entrySet()) {
           ContainerDataProto containerInfo = entry.getValue().getContainerData();
           DatanodeDetails datanodeDetails = entry.getKey();
 
-          writer.writeContainerInfo(containerInfo, datanodeDetails);
-
-          if (verboseSettings.printBlocks()) {
-            BlockData blockInfo = getChunksForLocation(locationInfo, xceiverClient);
-
-            writer.writeBlockInfo(blockInfo);
-
-            if (verboseSettings.printChunks()) {
-              List<ChunkInfo> chunkList = blockInfo.getChunksList();
-
-              for (ChunkInfo chunk : chunkList) {
-                writer.writeChunkInfo(chunk);
-              }
-            }
-          }
+          writer.writeContainerInfo(
+              containerInfo,
+              datanodeDetails,
+              () -> printContainerDetails(locationInfo, xceiverClient)
+          );
         }
       }
     }
   }
 
-  protected BlockData getChunksForLocation(OmKeyLocationInfo keyLocationInfo, XceiverClientSpi xceiverClient)
+  private Map<DatanodeDetails, ReadContainerResponseProto> readContainerInfos(OmKeyLocationInfo locationInfo,
+      Pipeline pipeline) throws IOException {
+    try {
+      return containerOperationClient.readContainerFromAllNodes(locationInfo.getContainerID(), pipeline);
+    } catch (InterruptedException e) {
+      throw new IOException(e);
+    }
+  }
+
+  private void printContainerDetails(OmKeyLocationInfo locationInfo, XceiverClientSpi xceiverClient)
+      throws IOException {
+    if (verboseSettings.printBlocks()) {
+      BlockData blockInfo = getChunksForLocation(locationInfo, xceiverClient);
+
+      writer.writeBlockInfo(blockInfo, () -> printBlockDetails(blockInfo));
+    }
+  }
+
+  private void printBlockDetails(BlockData blockInfo) throws IOException {
+    if (verboseSettings.printChunks()) {
+      List<ChunkInfo> chunkList = blockInfo.getChunksList();
+
+      writer.writeChunkInfo(chunkList);
+    }
+  }
+
+  private BlockData getChunksForLocation(OmKeyLocationInfo keyLocationInfo, XceiverClientSpi xceiverClient)
       throws IOException {
     Token<OzoneBlockTokenIdentifier> token = keyLocationInfo.getToken();
     Pipeline pipeline = keyLocationInfo.getPipeline();
