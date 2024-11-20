@@ -19,7 +19,7 @@ public final class OzoneFsckPathPrefix {
     return volume;
   }
 
-  @Nullable String container() {
+  @Nullable String bucket() {
     return bucket;
   }
 

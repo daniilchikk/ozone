@@ -35,7 +35,6 @@ import org.apache.hadoop.ozone.shell.Handler;
 import org.apache.hadoop.ozone.shell.OzoneAddress;
 import org.apache.hadoop.ozone.shell.OzoneShell;
 import org.apache.hadoop.ozone.shell.Shell;
-import org.apache.hadoop.ozone.shell.fsck.writer.JacksonOzoneFsckWriter;
 import org.apache.hadoop.ozone.shell.fsck.writer.OzoneFsckWriter;
 import org.apache.hadoop.ozone.shell.fsck.writer.PlainTextOzoneFsckWriter;
 import org.kohsuke.MetaInfServices;
@@ -177,9 +176,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
     case PLAIN_TEXT:
       return new PlainTextOzoneFsckWriter(Files.newBufferedWriter(outputPath));
     case JSON:
-      return new JacksonOzoneFsckWriter();
     case XML:
-      return new JacksonOzoneFsckWriter();
     default:
       throw new IllegalArgumentException("Unsupported output format: " + localOutputFormat);
     }

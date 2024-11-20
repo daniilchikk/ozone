@@ -61,8 +61,13 @@ public class ContainerMultinodeApiImpl implements ContainerMultinodeApi {
     return datanodeToResponseMap;
   }
 
+  /**
+   * Close method is not operational as of now.
+   * {@link #client} should be closed by calling either {@link XceiverClientManager#releaseClient(XceiverClientSpi)}
+   * or {@link XceiverClientManager#releaseClientForReadData(XceiverClientSpi)}.
+   */
   @Override
-  public void close() throws IOException {
-    //client.close();
+  public void close() {
+    // NOOP
   }
 }

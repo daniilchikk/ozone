@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.Writer;
 import java.util.Set;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
@@ -44,7 +45,7 @@ public class PlainTextOzoneFsckWriter implements OzoneFsckWriter {
     printLine("Key Information:");
     printLine("  Name: %s/%s/%s", keyInfo.getVolumeName(), keyInfo.getBucketName(), keyInfo.getKeyName());
     printLine("  Path: %s", keyInfo.getPath());
-    printLine("  Size: %s", formatSize(keyInfo.getDataSize()));
+    printLine("  Size: %s", FileUtils.byteCountToDisplaySize(keyInfo.getDataSize()));
     printLine("  Type: %s", keyInfo.isFile() ? "File" : "Directory");
     writer.flush();
   }
@@ -129,11 +130,5 @@ public class PlainTextOzoneFsckWriter implements OzoneFsckWriter {
   @Override
   public void close() throws IOException {
     writer.close();
-  }
-
-  public static String formatSize(long v) {
-    if (v < 1024) return v + " B";
-    int z = (63 - Long.numberOfLeadingZeros(v)) / 10;
-    return String.format("%.1f %sB", (double)v / (1L << (z*10)), " KMGTPE".charAt(z));
   }
 }

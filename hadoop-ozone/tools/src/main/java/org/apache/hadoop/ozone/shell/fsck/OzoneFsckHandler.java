@@ -120,7 +120,7 @@ public class OzoneFsckHandler implements AutoCloseable {
   }
 
   private void scanBuckets(OzoneVolume volume) throws IOException {
-    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.container());
+    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.bucket());
 
     while (buckets.hasNext()) {
       scanKeys(buckets.next());
