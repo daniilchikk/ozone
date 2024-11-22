@@ -19,14 +19,13 @@
 
 COMPOSE_DIR="$( cd "$( dirname "${BASH_SOURCE0}" )" >/dev/null 2>&1 && pwd )"
 export COMPOSE_DIR
-export OM_SERVICE_ID="om"
+export OM_SERVICE_ID=om
 export OM=om1
 export SCM=scm1
-export DATANODE=datanode
 export OZONE_REPLICATION_FACTOR=3
 
 # shellcheck source=/dev/null
 source "$COMPOSE_DIR/../testlib.sh"
 
 start_docker_env
-execute_robot_test ${DATANODE} fscheck/testFscheck.robot
+execute_robot_test datanode fscheck/testFscheck.robot
