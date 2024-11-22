@@ -36,9 +36,6 @@ services:
       environment:
          <<: *replication
       command: ["ozone","datanode"]
-      volumes:
-         - tmpfs1:/data
-         - ../..:/opt/hadoop
       deploy:
          replicas: ${DATANODE1_REPLICA:-1}
    datanode2:
@@ -49,9 +46,6 @@ services:
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
-      volumes:
-         - tmpfs2:/data
-         - ../..:/opt/hadoop
       deploy:
          replicas: ${DATANODE2_REPLICA:-1}
    datanode3:
@@ -62,9 +56,6 @@ services:
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
-      volumes:
-         - tmpfs3:/data
-         - ../..:/opt/hadoop
       deploy:
          replicas: ${DATANODE3_REPLICA:-1}
    datanode4:
@@ -75,9 +66,6 @@ services:
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
-      volumes:
-         - tmpfs4:/data
-         - ../..:/opt/hadoop
       deploy:
          replicas: ${DATANODE4_REPLICA:-1}
    datanode5:
@@ -88,9 +76,6 @@ services:
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
-      volumes:
-         - tmpfs5:/data
-         - ../..:/opt/hadoop
       deploy:
          replicas: ${DATANODE5_REPLICA:-1}
    om1:
