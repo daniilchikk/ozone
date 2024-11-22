@@ -19,6 +19,9 @@
 
 COMPOSE_DIR="$( cd "$( dirname "${BASH_SOURCE0}" )" >/dev/null 2>&1 && pwd )"
 export COMPOSE_DIR
+export OM_SERVICE_ID="om"
+export OM=om1
+export SCM=scm1
 export DATANODE=datanode
 export OZONE_REPLICATION_FACTOR=3
 
