@@ -94,10 +94,7 @@ Cleanup Ozone Test Environment
     Log    Cleaning up Ozone test environment...
     ${keys}=    Evaluate    ${num_keys} + 1
     FOR    ${i}    IN RANGE    1    ${keys}
-        ${block_id}=    Execute    ozone sh key info /${TEST_VOLUME}/${TEST_BUCKET}/key${i} | jq -r '.ozoneKeyLocations[].localID'
-        ${block_path}=    Execute    bash -c "find /data/hdds/hdds -name '*${block_id}.block' | head -n 1"
         Execute And Ignore Error    ozone fs -rm -skipTrash /${TEST_VOLUME}/${TEST_BUCKET}/key${i}
-        Execute    rm -r ${block_path}
     END
     Execute And Ignore Error    ozone sh bucket delete /${TEST_VOLUME}/${TEST_BUCKET}
     Execute And Ignore Error    ozone sh volume delete /${TEST_VOLUME}
@@ -108,7 +105,7 @@ Corrupt Keys
     FOR    ${i}    IN RANGE    1    ${keys}
         ${block_id}=    Execute    ozone sh key info /${TEST_VOLUME}/${TEST_BUCKET}/key${i} | jq -r '.ozoneKeyLocations[].localID'
         ${block_path}=    Execute    bash -c "find /data/hdds/hdds -name '*${block_id}.block' | head -n 1"
-        Execute    bash -c "dd if=/dev/urandom of=${block_path} bs=1 count=256 seek=256 conv=notrunc"
+        Execute    rm -r ${block_path}
     END
 
 Run FSCheck Damaged Keys

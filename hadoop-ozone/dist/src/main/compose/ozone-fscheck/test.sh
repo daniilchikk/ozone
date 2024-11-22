@@ -23,9 +23,13 @@ export OM_SERVICE_ID=om
 export OM=om1
 export SCM=scm1
 export OZONE_REPLICATION_FACTOR=3
+export DATANODE2_REPLICA=0
+export DATANODE3_REPLICA=0
+export DATANODE4_REPLICA=0
+export DATANODE5_REPLICA=0
 
 # shellcheck source=/dev/null
 source "$COMPOSE_DIR/../testlib.sh"
 
 start_docker_env
-execute_robot_test datanode fscheck/testFscheck.robot
+execute_robot_test datanode1 fscheck/testFscheck.robot
