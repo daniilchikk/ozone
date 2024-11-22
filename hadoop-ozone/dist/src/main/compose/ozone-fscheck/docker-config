@@ -19,10 +19,10 @@ OZONE_CONF_CONTAINER='{
 "CORE-SITE.XML_hadoop.proxyuser.hadoop.hosts": "*",
 "CORE-SITE.XML_hadoop.proxyuser.hadoop.groups": "*",
 
-"CORE-SITE.XML_fs.defaultFS": "ofs://omservice/",
-"CORE-SITE.XML_fs.trash.interval": "0.01",
+"CORE-SITE.XML_fs.defaultFS": "ofs://om/"
+"CORE-SITE.XML_fs.trash.interval": "1",
 
-"OZONE-SITE.XML_ozone.om.service.ids": "omservice",
+"OZONE-SITE.XML_ozone.om.service.ids": "om",
 "OZONE-SITE.XML_ozone.om.nodes.omservice": "om1,om2,om3",
 "OZONE-SITE.XML_ozone.om.address.omservice.om1": "om1",
 "OZONE-SITE.XML_ozone.om.address.omservice.om2": "om2",
