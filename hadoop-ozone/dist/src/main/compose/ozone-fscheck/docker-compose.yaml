@@ -33,6 +33,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode
       environment:
          <<: *replication
       command: ["ozone","datanode"]
