@@ -25,7 +25,7 @@ x-common-config:
 
 x-replication:
   &replication
-   OZONE-SITE.XML_ozone.server.default.replication: ${OZONE_REPLICATION_FACTOR:-3}
+   OZONE-SITE.XML_ozone.server.default.replication: ${OZONE_REPLICATION_FACTOR:-1}
 
 services:
    datanode1:
@@ -33,6 +33,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode1
       environment:
          <<: *replication
       command: ["ozone","datanode"]
@@ -151,7 +152,6 @@ services:
    s3g:
       <<: *common-config
       environment:
-         OZONE_OPTS:
          <<: *replication
       ports:
          - 9878:9878
