@@ -36,7 +36,7 @@ services:
       hostname: datanode1
       environment:
          <<: *replication
-      command: ["ozone","datanode"]
+      command: [ "ozone","datanode" ]
       deploy:
          replicas: ${DATANODE1_REPLICA:-1}
    datanode2:
@@ -44,6 +44,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode2
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
@@ -54,6 +55,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode3
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
@@ -64,6 +66,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode4
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
@@ -74,6 +77,7 @@ services:
       ports:
          - 19864
          - 9882
+      hostname: datanode5
       environment:
          <<: *replication
       command: [ "ozone","datanode" ]
