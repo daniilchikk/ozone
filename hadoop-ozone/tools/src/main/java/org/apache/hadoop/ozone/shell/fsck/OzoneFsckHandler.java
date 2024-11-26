@@ -216,7 +216,7 @@ public class OzoneFsckHandler implements AutoCloseable {
       for (OmKeyLocationInfo locationInfo : locationInfoGroup.getBlocksLatestVersionOnly()) {
         Pipeline pipeline = locationInfo.getPipeline();
 
-        if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+        if (pipeline.getType() != ReplicationType.STAND_ALONE && pipeline.getType() != ReplicationType.EC) {
           pipeline = Pipeline.newBuilder(pipeline)
               .setReplicationConfig(
                   StandaloneReplicationConfig.getInstance(
@@ -258,7 +258,7 @@ public class OzoneFsckHandler implements AutoCloseable {
     Token<OzoneBlockTokenIdentifier> token = keyLocationInfo.getToken();
     Pipeline pipeline = keyLocationInfo.getPipeline();
 
-    if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+    if (pipeline.getType() != ReplicationType.STAND_ALONE && pipeline.getType() != ReplicationType.EC) {
       pipeline = Pipeline.newBuilder(pipeline)
           .setReplicationConfig(StandaloneReplicationConfig
               .getInstance(ReplicationConfig.getLegacyFactor(pipeline.getReplicationConfig())))
