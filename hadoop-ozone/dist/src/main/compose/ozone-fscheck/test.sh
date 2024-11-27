@@ -30,4 +30,4 @@ export DATANODE5_REPLICA=0
 source "$COMPOSE_DIR/../testlib.sh"
 
 start_docker_env
-execute_robot_test datanode1 fscheck/testFscheck.robot
+execute_robot_test datanode1 -v REPLICATION:THREE -v TYPE:RATIS fscheck/testFscheck.robot

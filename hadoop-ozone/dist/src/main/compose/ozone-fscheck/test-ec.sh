@@ -28,4 +28,4 @@ export OZONE_REPLICATION_FACTOR=3
 source "$COMPOSE_DIR/../testlib.sh"
 
 start_docker_env
-execute_robot_test datanode1 fscheck/testFscheckEC.robot
+execute_robot_test datanode1 -v REPLICATION:rs-3-2-1024k -v TYPE:EC fscheck/testFscheck.robot

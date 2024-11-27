@@ -107,13 +107,13 @@ Setup Ozone Test Environment
     [Arguments]    ${num_keys}
     Log    Setting up Ozone test environment...
     Execute And Ignore Error    ozone sh volume create ${TEST_VOLUME}
-    Execute And Ignore Error    ozone sh bucket create ${TEST_VOLUME}/${TEST_BUCKET}
+    Execute And Ignore Error    ozone sh bucket create --type=${TYPE} --replication=${REPLICATION} ${TEST_VOLUME}/${TEST_BUCKET}
     ${keys}=    Evaluate    ${num_keys} + 1
     FOR    ${i}    IN RANGE    1    ${keys}
         ${key}    Set Variable    key${i}
         ${file}   Set Variable    random_file_${i}
         Execute    dd if=/dev/urandom of=${file} bs=1M count=10
-        Execute    ozone sh key put ${TEST_VOLUME}/${TEST_BUCKET}/${key} ${file}
+        Execute    ozone sh key put --type=${TYPE} --replication=${REPLICATION} ${TEST_VOLUME}/${TEST_BUCKET}/${key} ${file}
     END
 
 Cleanup Ozone Test Environment
