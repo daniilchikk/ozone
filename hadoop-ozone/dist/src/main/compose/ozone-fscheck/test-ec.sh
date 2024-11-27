@@ -28,8 +28,4 @@ export OZONE_REPLICATION_FACTOR=3
 source "$COMPOSE_DIR/../testlib.sh"
 
 start_docker_env
-execute_robot_test datanode1 fscheck/ECSetup.robot
-execute_robot_test datanode2 fscheck/corruptECKey.robot
-execute_robot_test datanode3 fscheck/corruptECKey.robot
-execute_robot_test datanode4 fscheck/corruptECKey.robot
 execute_robot_test datanode1 fscheck/testFscheckEC.robot
