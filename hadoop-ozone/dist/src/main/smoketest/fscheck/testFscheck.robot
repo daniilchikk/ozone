@@ -112,7 +112,7 @@ Setup Ozone Test Environment
     FOR    ${i}    IN RANGE    1    ${keys}
         ${key}    Set Variable    key${i}
         ${file}   Set Variable    random_file_${i}
-        Execute    dd if=/dev/urandom of=${file} bs=1M count=10
+        Execute    dd if=/dev/urandom of=${file} bs=1M count=1
         Execute    ozone sh key put --type=${TYPE} --replication=${REPLICATION} ${TEST_VOLUME}/${TEST_BUCKET}/${key} ${file}
     END
 
