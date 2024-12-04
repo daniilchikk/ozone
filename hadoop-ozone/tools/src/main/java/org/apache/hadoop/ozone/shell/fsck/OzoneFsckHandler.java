@@ -21,7 +21,13 @@ package org.apache.hadoop.ozone.shell.fsck;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationFactor.ONE;
 import static org.apache.hadoop.hdds.protocol.proto.HddsProtos.ReplicationType.STAND_ALONE;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -76,6 +82,8 @@ public class OzoneFsckHandler implements AutoCloseable {
 
   private final boolean deleteCorruptedKeys;
 
+  private final Path checkpointFile;
+
   private final OzoneClient client;
 
   private final OzoneManagerProtocol omClient;
@@ -103,6 +111,8 @@ public class OzoneFsckHandler implements AutoCloseable {
     this.writer = writer;
     this.verboseSettings = verboseSettings;
     this.deleteCorruptedKeys = deleteCorruptedKeys;
+    this.checkpointFile = Paths.get("/tmp/checkpoint.txt");
+    loadCheckpoint();
     this.client = client;
     this.omClient = client.getObjectStore().getClientProxy().getOzoneManagerClient();
     this.containerOperationClient = new ContainerOperationClient(ozoneConfiguration);
@@ -115,30 +125,109 @@ public class OzoneFsckHandler implements AutoCloseable {
    * @throws IOException if an I/O error occurs during the scan process.
    */
   public void scan() throws IOException {
+    initializeCheckpoint();
     scanVolumes();
+    deleteCheckpoint();
+  }
+
+  private void initializeCheckpoint() throws IOException {
+    try {
+      if (!Files.exists(checkpointFile)) {
+        Files.createFile(checkpointFile);
+      }
+    } catch (IOException e) {
+      throw new IOException("Failed to create checkpoint file: " + checkpointFile, e);
+    }
+  }
+  private void deleteCheckpoint() throws IOException {
+    try {
+      Files.delete(checkpointFile);
+    } catch (IOException e) {
+      throw new IOException("Failed to delete checkpoint file: " + checkpointFile, e);
+    }
+  }
+  private OzoneFsckCheckpointState loadCheckpoint() throws IOException {
+    OzoneFsckCheckpointState state = new OzoneFsckCheckpointState();
+    if (Files.exists(checkpointFile)) {
+      try (BufferedReader reader = Files.newBufferedReader(checkpointFile)) {
+        String line;
+        while ((line = reader.readLine()) != null) {
+          String[] parts = line.split(": ");
+          switch (parts[0]) {
+            case "volumeName":
+              state.setLastCheckedVolume(parts[1]);
+              break;
+            case "bucketName":
+              state.setLastCheckedBucket(parts[1]);
+              break;
+            case "keyName":
+              state.setLastCheckedKey(parts[1]);
+              break;
+          }
+        }
+      }
+    }
+    return state;
+  }
+
+  private void saveCheckpoint(String volume, String bucket, String key) throws IOException {
+    try (BufferedWriter writer = Files.newBufferedWriter(checkpointFile, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+      if (volume != null) {
+        writer.write("volumeName: " + volume);
+        writer.newLine();
+      }
+      if (bucket != null) {
+        writer.write("bucketName: " + bucket);
+        writer.newLine();
+      }
+      if (key != null) {
+        writer.write("keyName: " + key);
+        writer.newLine();
+      }
+    }
   }
 
   private void scanVolumes() throws IOException {
-    Iterator<? extends OzoneVolume> volumes = client.getObjectStore().listVolumes(pathPrefix.volume());
+    OzoneFsckCheckpointState state = loadCheckpoint();
+    Iterator<? extends OzoneVolume> volumes = client.getObjectStore()
+            .listVolumes(pathPrefix.volume(), state.getLastCheckedVolume());
 
+    String lastCheckedVolume = null;
     while (volumes.hasNext()) {
-      scanBuckets(volumes.next());
+      OzoneVolume volume = volumes.next();
+      lastCheckedVolume = volume.getName();
+      scanBuckets(volume);
+      saveCheckpoint(lastCheckedVolume, null, null);
     }
   }
 
   private void scanBuckets(OzoneVolume volume) throws IOException {
-    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.container());
+    OzoneFsckCheckpointState state = loadCheckpoint();
+    String prevBucket = volume.getName().equals(state.getLastCheckedVolume()) ? state.getLastCheckedBucket() : null;
 
+    Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.container(), prevBucket);
+
+    String lastCheckedBucket = null;
     while (buckets.hasNext()) {
-      scanKeys(buckets.next());
+      OzoneBucket bucket = buckets.next();
+      lastCheckedBucket = bucket.getName();
+      scanKeys(bucket);
+      saveCheckpoint(volume.getName(), lastCheckedBucket, null);
     }
   }
 
   private void scanKeys(OzoneBucket bucket) throws IOException {
-    Iterator<? extends OzoneKey> keys = bucket.listKeys(pathPrefix.key());
+    OzoneFsckCheckpointState state = loadCheckpoint();
+    String prevKey = bucket.getName().equals(state.getLastCheckedBucket()) ? state.getLastCheckedKey() : null;
 
+    Iterator<? extends OzoneKey> keys = bucket.listKeys(pathPrefix.key(), prevKey);
+
+    String lastCheckedKey = null;
     while (keys.hasNext()) {
-      scanKey(keys.next());
+      OzoneKey key = keys.next();
+      lastCheckedKey = key.getName();
+      scanKey(key);
+      saveCheckpoint(bucket.getVolumeName(), bucket.getName(), lastCheckedKey);
     }
   }
 
@@ -222,7 +311,7 @@ public class OzoneFsckHandler implements AutoCloseable {
       for (OmKeyLocationInfo locationInfo : locationInfoGroup.getBlocksLatestVersionOnly()) {
         Pipeline pipeline = locationInfo.getPipeline();
 
-        if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+        if (pipeline.getType() != ReplicationType.STAND_ALONE && pipeline.getType() != ReplicationType.EC) {
           pipeline = Pipeline.newBuilder(pipeline)
               .setReplicationConfig(
                   StandaloneReplicationConfig.getInstance(
@@ -280,7 +369,7 @@ public class OzoneFsckHandler implements AutoCloseable {
     Token<OzoneBlockTokenIdentifier> token = keyLocationInfo.getToken();
     Pipeline pipeline = keyLocationInfo.getPipeline();
 
-    if (pipeline.getType() != ReplicationType.STAND_ALONE) {
+    if (pipeline.getType() != ReplicationType.STAND_ALONE && pipeline.getType() != ReplicationType.EC) {
       pipeline = Pipeline.newBuilder(pipeline)
           .setReplicationConfig(StandaloneReplicationConfig
               .getInstance(ReplicationConfig.getLegacyFactor(pipeline.getReplicationConfig())))
