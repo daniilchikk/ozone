@@ -20,6 +20,7 @@ package org.apache.hadoop.ozone.shell.fsck;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,7 +36,7 @@ import org.apache.hadoop.ozone.shell.Handler;
 import org.apache.hadoop.ozone.shell.OzoneAddress;
 import org.apache.hadoop.ozone.shell.OzoneShell;
 import org.apache.hadoop.ozone.shell.Shell;
-import org.apache.hadoop.ozone.shell.fsck.writer.JacksonOzoneFsckWriter;
+import org.apache.hadoop.ozone.shell.fsck.writer.JsonOzoneFsckWriter;
 import org.apache.hadoop.ozone.shell.fsck.writer.OzoneFsckWriter;
 import org.apache.hadoop.ozone.shell.fsck.writer.PlainTextOzoneFsckWriter;
 import org.kohsuke.MetaInfServices;
@@ -53,13 +54,10 @@ import picocli.CommandLine;
  * <li>`--bucket-prefix`: Specifies the prefix for buckets that should be included in the check.
  * <li>`--key-prefix`: Specifies the prefix for keys that should be included in the check.
  * <li>`--delete`: Deletes the corrupted keys.
- * <li>`--keys`: Displays information about good and healthy keys.
- * <li>`--verbosity-level`: Controls a verbosity of the presented output.
- * <li>`--blocks`: Includes information about blocks.
- * <li>`--chunks`: Includes information about chunks.
- * <li>`--verbose` or `-v`: Provides full verbose output, ignoring the --keys, --containers, --blocks,
- * and --chunks options.
+ * <li>`--healthy-keys`: Displays information about good and healthy keys.
+ * <li>`--verbosity-level`: Controls verbosity of the presented output.
  * <li>`--output` or `-o`: Specifies the file to output information about the scan process.
+ * <li>`--output-format`: Specifies what format to use for a report.
  * If not specified, the information will be printed to the system output.
  *</ul>
  * @see OzoneFsckVerbosityLevel OzoneFsckVerbosityLevel class for a verbosity level options.
@@ -88,7 +86,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
       description = "Deletes the corrupted keys")
   private boolean delete;
 
-  @CommandLine.Option(names = {"--keys"},
+  @CommandLine.Option(names = {"--healthy-keys"},
       description = "Specifies whether to display information about good and healthy keys")
   private boolean keys;
 
@@ -99,7 +97,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
           + " - KEY: prints information about a key itself only.\n"
           + " - CONTAINER: additionally prints information about key's containers.\n"
           + " - BLOCK: additionally prints information about container's blocks.\n"
-          + " - CHUNK: prints information about block's chunk.\n")
+          + " - CHUNK: prints information about block's chunk.")
   private OzoneFsckVerbosityLevel verbose;
 
   @CommandLine.Option(names = {"--output", "-o"},
@@ -156,10 +154,26 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
 
   private static OzoneFsckWriter createReportWriter(@Nullable String output,
       @Nullable OzoneFsckOutputFormat outputFormat) throws IOException {
+    Writer writer = createWriter(output);
+
     OzoneFsckOutputFormat localOutputFormat = outputFormat == null ? OzoneFsckOutputFormat.PLAIN_TEXT : outputFormat;
 
+    switch (localOutputFormat) {
+    case PLAIN_TEXT:
+      return new PlainTextOzoneFsckWriter(writer);
+    case JSON:
+      return JsonOzoneFsckWriter.create(writer);
+    case XML:
+      // TODO: Currently unsupported due to issues with Jackson XML streaming API.
+      throw new UnsupportedOperationException("XML format is not supported yet.");
+    default:
+      throw new IllegalArgumentException("Unsupported output format: " + localOutputFormat);
+    }
+  }
+
+  private static Writer createWriter(@Nullable String output) throws IOException {
     if (Strings.isNullOrEmpty(output)) {
-      return new PlainTextOzoneFsckWriter(new PrintWriter(System.out));
+      return new PrintWriter(System.out);
     }
 
     Path outputPath = Paths.get(output);
@@ -173,16 +187,7 @@ public class OzoneFsckCommand extends Handler implements SubcommandWithParent {
       throw new IOException("Can't write to output file: " + output);
     }
 
-    switch (localOutputFormat) {
-    case PLAIN_TEXT:
-      return new PlainTextOzoneFsckWriter(Files.newBufferedWriter(outputPath));
-    case JSON:
-      return new JacksonOzoneFsckWriter();
-    case XML:
-      return new JacksonOzoneFsckWriter();
-    default:
-      throw new IllegalArgumentException("Unsupported output format: " + localOutputFormat);
-    }
+    return Files.newBufferedWriter(outputPath);
   }
 
   @Override

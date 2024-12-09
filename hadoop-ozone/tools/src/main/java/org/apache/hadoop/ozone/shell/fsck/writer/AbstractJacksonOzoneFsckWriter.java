@@ -18,15 +18,16 @@
 
 package org.apache.hadoop.ozone.shell.fsck.writer;
 
-import static org.apache.commons.io.FileUtils.byteCountToDisplaySize;
 import static org.apache.hadoop.ozone.shell.fsck.writer.KeyState.DAMAGED_BLOCKS;
 import static org.apache.hadoop.ozone.shell.fsck.writer.KeyState.NO_BLOCKS;
+import static org.apache.hadoop.ozone.shell.fsck.writer.OzoneFsckWriter.formatKeyName;
 import static org.apache.hadoop.ozone.shell.fsck.writer.OzoneFsckWriter.printKeyType;
 
+import com.fasterxml.jackson.core.JsonGenerator;
 import java.io.IOException;
-import java.io.Writer;
 import java.util.List;
 import java.util.Set;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.BlockData;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ChunkInfo;
@@ -36,114 +37,104 @@ import org.apache.hadoop.hdds.protocol.proto.HddsProtos.BlockID;
 import org.apache.hadoop.ozone.om.helpers.OmKeyInfo;
 import org.apache.hadoop.ozone.om.helpers.OmKeyLocationInfo;
 
-/** A writer implementation for the Ozone Filesystem Check (Fsck) that outputs information in plain text format. */
-public class PlainTextOzoneFsckWriter implements OzoneFsckWriter {
-  private final Writer writer;
+public abstract class AbstractJacksonOzoneFsckWriter implements OzoneFsckWriter {
+  private final JsonGenerator generator;
 
-  public PlainTextOzoneFsckWriter(Writer writer) {
-    this.writer = writer;
+  protected AbstractJacksonOzoneFsckWriter(JsonGenerator generator) throws IOException {
+    this.generator = generator;
+
+    this.generator.writeStartArray();
   }
 
   @Override
   public void writeKeyInfo(OmKeyInfo keyInfo, PrinterFunction innerInfoPrinter) throws IOException {
-    keySeparator();
-    printLine("Key Information:");
-    printLine("  Name: %s/%s/%s", keyInfo.getVolumeName(), keyInfo.getBucketName(), keyInfo.getKeyName());
-    printLine("  Path: %s", keyInfo.getPath());
-    printLine("  Size: %s", byteCountToDisplaySize(keyInfo.getDataSize()));
-    printLine("  Type: %s", printKeyType(keyInfo));
+    generator.writeStartObject();
+
+    generator.writeStringField("name", formatKeyName(keyInfo));
+    generator.writeStringField("path", keyInfo.getPath());
+    generator.writeStringField("size", FileUtils.byteCountToDisplaySize(keyInfo.getDataSize()));
+    generator.writeStringField("type", printKeyType(keyInfo));
 
     innerInfoPrinter.print();
 
-    writer.flush();
+    generator.writeEndObject();
   }
 
   @Override
   public void writeCorruptedKey(OmKeyInfo keyInfo) throws IOException {
-    writeKeyInfo(keyInfo, () -> printLine(String.format("Key state: %s! No blocks present for the key.", NO_BLOCKS)));
-
-    writer.flush();
+    writeKeyInfo(keyInfo, () -> generator.writeStringField("state", String.valueOf(NO_BLOCKS)));
   }
 
   @Override
   public void writeDamagedBlocks(Set<BlockID> damagedBlocks) throws IOException {
     if (!damagedBlocks.isEmpty()) {
-      sectionSeparator();
-      printLine(String.format("Key state: %s", DAMAGED_BLOCKS));
-      printLine("Damaged blocks:");
+      generator.writeStringField("state", String.valueOf(DAMAGED_BLOCKS));
+
+      generator.writeArrayFieldStart("damaged_blocks");
+
       for (BlockID blockID : damagedBlocks) {
-        printLine("  %s", blockID.getContainerBlockID());
+        generator.writeString(blockID.toString());
       }
+      generator.writeEndArray();
     }
   }
 
   @Override
   public void writeLocationInfo(OmKeyLocationInfo locationInfo) throws IOException {
-    subsectionSeparator();
-    printLine("Location information:");
-    printLine("  Pipeline: %s", locationInfo.getPipeline());
-    subsectionSeparator();
+    generator.writeObjectFieldStart("location_info");
+
+    generator.writeStringField("pipeline", locationInfo.getPipeline().toString());
+
+    generator.writeEndObject();
   }
 
   @Override
   public void writeContainerInfo(ContainerDataProto container, DatanodeDetails datanodeDetails,
       PrinterFunction containerDetailsPrinter) throws IOException {
-    printLine("  Container %s information:", container.getContainerID());
-    printLine("    Path: %s", container.getContainerPath());
-    printLine("    Type: %s", container.getContainerType());
-    printLine("    State: %s", container.getState());
-    printLine("    Datanode: %s (%s)", datanodeDetails.getHostName(), datanodeDetails.getUuidString());
+    generator.writeFieldName("container");
+
+    generator.writeStartObject();
+
+    generator.writeNumberField("id", container.getContainerID());
+    generator.writeStringField("path", container.getContainerPath());
+    generator.writeStringField("type", container.getContainerType().toString());
+    generator.writeStringField("state", container.getState().toString());
+    generator.writeStringField("datanode",
+        String.format("%s (%s)", datanodeDetails.getHostName(), datanodeDetails.getUuidString()));
 
     containerDetailsPrinter.print();
+
+    generator.writeEndObject();
   }
 
   @Override
   public void writeBlockInfo(BlockData blockInfo, PrinterFunction blockDetailsPrinter) throws IOException {
-    subsectionSeparator();
+    generator.writeObjectFieldStart("block");
+
     DatanodeBlockID blockID = blockInfo.getBlockID();
 
-    printLine("  Block %s information:", blockID.getLocalID());
-    printLine("    Block commit sequence id: %s", blockID.getBlockCommitSequenceId());
+    generator.writeNumberField("id", blockID.getLocalID());
+    generator.writeNumberField("sequence_id", blockID.getBlockCommitSequenceId());
 
     blockDetailsPrinter.print();
+
+    generator.writeEndObject();
   }
 
   @Override
-  public void writeChunkInfo(List<ChunkInfo> chunks) throws IOException {
-    for (ChunkInfo chunk : chunks) {
-      printLine("      Chunk: %s", chunk.getChunkName());
+  public void writeChunkInfo(List<ChunkInfo> chunk) throws IOException {
+    generator.writeArrayFieldStart("chunks");
+
+    for (ChunkInfo chunkInfo : chunk) {
+      generator.writeString(chunkInfo.getChunkName());
     }
-  }
 
-  private void eol() throws IOException {
-    writer.write(System.lineSeparator());
-    writer.flush();
-  }
-
-  private void printLine(String line, Object... args) throws IOException {
-    writer.write(String.format(line, args));
-    eol();
-  }
-
-  private void keySeparator() throws IOException {
-    separator("============");
-  }
-
-  private void sectionSeparator() throws IOException {
-    separator("------------");
-  }
-
-  private void subsectionSeparator() throws IOException {
-    eol();
-  }
-
-  private void separator(String pattern) throws IOException {
-    writer.write(pattern);
-    eol();
+    generator.writeEndArray();
   }
 
   @Override
   public void close() throws IOException {
-    writer.close();
+    generator.writeEndArray();
+    generator.close();
   }
 }
