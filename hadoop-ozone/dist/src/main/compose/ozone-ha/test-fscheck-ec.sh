@@ -27,5 +27,5 @@ export OM_SERVICE_ID=omservice
 # shellcheck source=/dev/null
 source "$COMPOSE_DIR/../testlib.sh"
 
-start_docker_env 3
-execute_robot_test datanode -v COUNT:1 -v REPLICATION:THREE -v TYPE:RATIS fscheck/testFscheck.robot
+start_docker_env 5
+execute_robot_test datanode -v COUNT:3 -v REPLICATION:rs-3-2-1024k -v TYPE:EC fscheck/testFscheck.robot

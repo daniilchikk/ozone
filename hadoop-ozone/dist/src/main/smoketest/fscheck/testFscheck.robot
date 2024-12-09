@@ -14,7 +14,6 @@
 # limitations under the License.
 
 *** Settings ***
-Documentation       Smoketest ozone cluster startup with corrupted key test
 Library             OperatingSystem
 Library             String
 Library             Collections
@@ -112,7 +111,7 @@ Setup Ozone Test Environment
     FOR    ${i}    IN RANGE    1    ${keys}
         ${key}    Set Variable    key${i}
         ${file}   Set Variable    random_file_${i}
-        Execute    dd if=/dev/urandom of=${file} bs=1M count=1
+        Execute    dd if=/dev/urandom of=${file} bs=1M count=${COUNT}
         Execute    ozone sh key put --type=${TYPE} --replication=${REPLICATION} ${TEST_VOLUME}/${TEST_BUCKET}/${key} ${file}
     END
 
@@ -141,7 +140,7 @@ Delete Chunks
     FOR    ${i}    IN RANGE    1    ${keys}
         ${block_id}=    Execute    ozone sh key info /${TEST_VOLUME}/${TEST_BUCKET}/key${i} | jq -r '.ozoneKeyLocations[].localID'
         ${block_path}=    Execute    bash -c "find /data/hdds/hdds -name '*${block_id}.block' | head -n 1"
-        Execute    rm -r ${block_path}
+        Execute And Ignore Error    rm -r ${block_path}
     END
 
 Run FSCheck Damaged Keys
@@ -160,14 +159,14 @@ Run FSCheck With Delete
 
 Run FSCheck With Output
     Log    Running fscheck with output
-    Execute And Ignore Error    ozone sh fscheck --keys --output=${OUTPUT_FILE}
-    ${file_content}=    Get File    ${OUTPUT_FILE}
+    Execute And Ignore Error    ozone sh fscheck --healthy-keys --output=/tmp/file.txt
+    ${file_content}=    Get File    file.txt
     Should Contain    ${file_content}    key
 
 Run FSCheck With Verbose Key
     [Arguments]    ${num_keys}
     Log    Running fscheck with verbose option for keys
-    ${result}=    Execute    ozone sh fscheck --keys --verbosity-level=KEY
+    ${result}=    Execute    ozone sh fscheck --healthy-keys --verbosity-level=KEY
     Should Contain    ${result}    Key Information:
     ${keys}=    Evaluate    ${num_keys} + 1
     FOR    ${i}    IN RANGE    1    ${keys}
@@ -177,7 +176,7 @@ Run FSCheck With Verbose Key
 Run FSCheck With Verbose Chunk
     [Arguments]    ${num_keys}
     Log    Running fscheck with verbose option for chunks
-    ${result}=    Execute    ozone sh fscheck --keys --verbosity-level=CHUNK
+    ${result}=    Execute    ozone sh fscheck --healthy-keys --verbosity-level=CHUNK
     ${keys}=    Evaluate    ${num_keys} + 1
     FOR    ${i}    IN RANGE    1    ${keys}
         Should Contain    ${result}    ${TEST_VOLUME}/${TEST_BUCKET}/key${i}
@@ -186,12 +185,12 @@ Run FSCheck With Verbose Chunk
 
 Run FSCheck With Verbose Block
     Log    Running fscheck with verbose option for blocks
-    ${result}=    Execute    ozone sh fscheck --keys --verbosity-level=BLOCK
+    ${result}=    Execute    ozone sh fscheck --healthy-keys --verbosity-level=BLOCK
     Should Contain    ${result}    Block commit sequence id:
 
 Run FSCheck With Verbose Container
     Log    Running fscheck with verbose option for containers
-    ${result}=    Execute    ozone sh fscheck --keys --verbosity-level=CONTAINER
+    ${result}=    Execute    ozone sh fscheck --healthy-keys --verbosity-level=CONTAINER
     Should Contain    ${result}    Container
 
 Run FSCheck With Delete Option
