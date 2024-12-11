@@ -192,42 +192,51 @@ public class OzoneFsckHandler implements AutoCloseable {
     Iterator<? extends OzoneVolume> volumes = client.getObjectStore()
             .listVolumes(pathPrefix.volume(), state.getLastCheckedVolume());
 
-    String lastCheckedVolume = null;
+    String lastCheckedVolume;
+    String lastCheckedBucket = state.getLastCheckedBucket();
+    String lastCheckedKey = state.getLastCheckedKey();
+
     while (volumes.hasNext()) {
       OzoneVolume volume = volumes.next();
       lastCheckedVolume = volume.getName();
       scanBuckets(volume);
-      saveCheckpoint(lastCheckedVolume, null, null);
+      saveCheckpoint(lastCheckedVolume, lastCheckedBucket, lastCheckedKey);
     }
   }
 
   private void scanBuckets(OzoneVolume volume) throws IOException {
     OzoneFsckCheckpointState state = loadCheckpoint();
-    String prevBucket = volume.getName().equals(state.getLastCheckedVolume()) ? state.getLastCheckedBucket() : null;
+    String prevBucket = state.getLastCheckedBucket();
 
     Iterator<? extends OzoneBucket> buckets = volume.listBuckets(pathPrefix.container(), prevBucket);
 
-    String lastCheckedBucket = null;
+    String lastCheckedVolume = state.getLastCheckedVolume();
+    String lastCheckedBucket;
+    String lastCheckedKey = state.getLastCheckedKey();
+
     while (buckets.hasNext()) {
       OzoneBucket bucket = buckets.next();
       lastCheckedBucket = bucket.getName();
       scanKeys(bucket);
-      saveCheckpoint(volume.getName(), lastCheckedBucket, null);
+      saveCheckpoint(lastCheckedVolume, lastCheckedBucket, lastCheckedKey);
     }
   }
 
   private void scanKeys(OzoneBucket bucket) throws IOException {
     OzoneFsckCheckpointState state = loadCheckpoint();
-    String prevKey = bucket.getName().equals(state.getLastCheckedBucket()) ? state.getLastCheckedKey() : null;
+    String prevKey = state.getLastCheckedKey();
 
     Iterator<? extends OzoneKey> keys = bucket.listKeys(pathPrefix.key(), prevKey);
 
-    String lastCheckedKey = null;
+    String lastCheckedVolume = state.getLastCheckedVolume();
+    String lastCheckedBucket = state.getLastCheckedBucket();
+    String lastCheckedKey;
+
     while (keys.hasNext()) {
       OzoneKey key = keys.next();
       lastCheckedKey = key.getName();
       scanKey(key);
-      saveCheckpoint(bucket.getVolumeName(), bucket.getName(), lastCheckedKey);
+      saveCheckpoint(lastCheckedVolume, lastCheckedBucket, lastCheckedKey);
     }
   }
 
