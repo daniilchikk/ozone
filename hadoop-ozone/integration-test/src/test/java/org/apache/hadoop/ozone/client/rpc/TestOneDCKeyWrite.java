@@ -66,6 +66,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -87,6 +89,7 @@ class TestOneDCKeyWrite {
   private static final int BLOCK_SIZE = 64 * 1024; // 64KB
   private static final int CHUNK_SIZE = 16 * 1024; // 16KB
 
+  @BeforeAll
   static void init() throws Exception {
     testDir = GenericTestUtils.getTestDir(
                 TestSecureOzoneRpcClient.class.getSimpleName());
@@ -141,10 +144,24 @@ class TestOneDCKeyWrite {
     TestOzoneRpcClient.setClusterId(CLUSTER_ID);
   }
 
+  @AfterAll
+  static void shutdown() throws IOException {
+    if (ozClient != null) {
+      ozClient.close();
+    }
+
+    if (storageContainerLocationClient != null) {
+      storageContainerLocationClient.close();
+    }
+
+    if (cluster != null) {
+      cluster.shutdown();
+    }
+  }
+
   @ParameterizedTest
   @EnumSource(value = BucketLayout.class, names = { "FILE_SYSTEM_OPTIMIZED" })
   void testPutKeyOneDC(BucketLayout bucketLayout) throws Exception {
-    init();
     try {
       String volumeName = UUID.randomUUID().toString();
       String bucketName = UUID.randomUUID().toString();
@@ -164,7 +181,6 @@ class TestOneDCKeyWrite {
       cluster.shutdown();
     }
   }
-
 
   static void createAndVerifyStreamKeyData(OzoneBucket bucket)
       throws Exception {
