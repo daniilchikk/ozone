@@ -19,6 +19,8 @@ package org.apache.hadoop.ozone.client.rpc;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HashMap;
@@ -64,9 +66,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+@Execution(ExecutionMode.SAME_THREAD)
 class TestCrossDCKeyWrite {
 
   private static MiniOzoneCluster cluster = null;
@@ -104,7 +109,12 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "127.0.0.1";
+                  String host;
+                  try {
+                    host = InetAddress.getLocalHost().getHostAddress();
+                  } catch (UnknownHostException e) {
+                    throw new RuntimeException(e);
+                  }
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
@@ -153,7 +163,12 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "127.0.0.1";
+                  String host;
+                  try {
+                    host = InetAddress.getLocalHost().getHostAddress();
+                  } catch (UnknownHostException e) {
+                    throw new RuntimeException(e);
+                  }
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
