@@ -66,13 +66,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.parallel.Execution;
-import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-@Execution(ExecutionMode.SAME_THREAD)
-class TestCrossDCKeyWrite {
+class TestThreeDCKeyWrite {
 
   private static MiniOzoneCluster cluster = null;
   private static OzoneClient ozClient = null;
@@ -90,7 +87,7 @@ class TestCrossDCKeyWrite {
   private static final int BLOCK_SIZE = 64 * 1024; // 64KB
   private static final int CHUNK_SIZE = 16 * 1024; // 16KB
 
-  static void initThreeDC() throws Exception {
+  static void init() throws Exception {
     testDir = GenericTestUtils.getTestDir(
                 TestSecureOzoneRpcClient.class.getSimpleName());
     conf = new OzoneConfiguration();
@@ -144,64 +141,10 @@ class TestCrossDCKeyWrite {
     TestOzoneRpcClient.setClusterId(CLUSTER_ID);
   }
 
-  static void initOneDC() throws Exception {
-    testDir = GenericTestUtils.getTestDir(
-                TestSecureOzoneRpcClient.class.getSimpleName());
-    conf = new OzoneConfiguration();
-    conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "localhost:0=dc1");
-    conf.setBoolean(ScmConfigKeys.OZONE_SCM_PIPELINE_AUTO_CREATE_FACTOR_ONE, false);
-    cluster = MiniOzoneCluster.newBuilder(conf)
-        .setNumDatanodes(3)
-        .setScmId(SCM_ID)
-        .setClusterId(CLUSTER_ID)
-        .setBlockSize(BLOCK_SIZE)
-        .setChunkSize(CHUNK_SIZE)
-        .setStreamBufferSizeUnit(StorageUnit.BYTES)
-        .setDatanodesCreatedCallback((hddsDatanodes, configuration) -> {
-          List<String> dns = hddsDatanodes.stream()
-                .map(dn -> {
-                  int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host;
-                  try {
-                    host = InetAddress.getLocalHost().getHostAddress();
-                  } catch (UnknownHostException e) {
-                    throw new RuntimeException(e);
-                  }
-                  return host + ":" + ratisPort;
-                })
-                .collect(Collectors.toList());
-
-          StringBuilder sb = new StringBuilder();
-          for (String dn : dns) {
-            if (sb.length() > 0) {
-              sb.append(",");
-            }
-            sb.append(dn).append("=dc").append(1);
-          }
-          configuration.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, sb.toString());
-          conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, sb.toString());
-        })
-        .build();
-    cluster.waitForClusterToBeReady();
-    ozClient = OzoneClientFactory.getRpcClient(conf);
-    store = ozClient.getObjectStore();
-    storageContainerLocationClient = cluster.getStorageContainerLocationClient();
-    ozoneManager = cluster.getOzoneManager();
-    ozoneManager.setMinMultipartUploadPartSize(MPU_PART_MIN_SIZE);
-    TestOzoneRpcClient.setCluster(cluster);
-    TestOzoneRpcClient.setOzClient(ozClient);
-    TestOzoneRpcClient.setOzoneManager(ozoneManager);
-    TestOzoneRpcClient.setStorageContainerLocationClient(storageContainerLocationClient);
-    TestOzoneRpcClient.setStore(store);
-    TestOzoneRpcClient.setClusterId(CLUSTER_ID);
-  }
-
   @ParameterizedTest
   @EnumSource(value = BucketLayout.class, names = { "FILE_SYSTEM_OPTIMIZED" })
   void testPutKeyThreeDCs(BucketLayout bucketLayout) throws Exception {
-    initThreeDC();
+    init();
     try {
       String volumeName = UUID.randomUUID().toString();
       String bucketName = UUID.randomUUID().toString();
@@ -221,31 +164,6 @@ class TestCrossDCKeyWrite {
       cluster.shutdown();
     }
   }
-
-  @ParameterizedTest
-  @EnumSource(value = BucketLayout.class, names = { "FILE_SYSTEM_OPTIMIZED" })
-  void testPutKeyOneDC(BucketLayout bucketLayout) throws Exception {
-    initOneDC();
-    try {
-      String volumeName = UUID.randomUUID().toString();
-      String bucketName = UUID.randomUUID().toString();
-      store.createVolume(volumeName);
-      OzoneVolume volume = store.getVolume(volumeName);
-      BucketArgs bucketArgs = BucketArgs.newBuilder()
-            .setBucketLayout(bucketLayout)
-            .addMetadata(OzoneConsts.DATACENTERS, "dc1")
-            .setDefaultReplicationConfig(
-                new DefaultReplicationConfig(ReplicationConfig.fromTypeAndFactor(RATIS, THREE)))
-            .build();
-      volume.createBucket(bucketName, bucketArgs);
-      OzoneBucket bucket = volume.getBucket(bucketName);
-      createAndVerifyKeyData(bucket);
-      createAndVerifyStreamKeyData(bucket);
-    } finally {
-      cluster.shutdown();
-    }
-  }
-
 
   static void createAndVerifyStreamKeyData(OzoneBucket bucket)
       throws Exception {
