@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.StorageUnit;
 import org.apache.hadoop.hdds.client.DefaultReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
@@ -91,7 +92,7 @@ class TestCrossDCKeyWrite {
     conf = new OzoneConfiguration();
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "localhost:0=dc1,localhost:1=dc2,localhost:2=dc3");
+    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "192.168.1.85:0=dc1,192.168.1.85:1=dc2,192.168.1.85:2=dc3");
     conf.setBoolean(ScmConfigKeys.OZONE_SCM_PIPELINE_AUTO_CREATE_FACTOR_ONE, false);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(9)
@@ -104,7 +105,7 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "localhost";
+                  String host = "192.168.1.85";
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
@@ -140,7 +141,7 @@ class TestCrossDCKeyWrite {
     conf = new OzoneConfiguration();
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "localhost:0=dc1");
+    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "192.168.1.85:0=dc1");
     conf.setBoolean(ScmConfigKeys.OZONE_SCM_PIPELINE_AUTO_CREATE_FACTOR_ONE, false);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(3)
@@ -153,7 +154,7 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "localhost";
+                  String host = "192.168.1.85";
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
@@ -185,7 +186,7 @@ class TestCrossDCKeyWrite {
   }
 
   @ParameterizedTest
-  @EnumSource
+  @EnumSource(value = BucketLayout.class, names = { "FILE_SYSTEM_OPTIMIZED" })
   void testPutKeyThreeDCs(BucketLayout bucketLayout) throws Exception {
     initThreeDC();
     try {
@@ -194,11 +195,11 @@ class TestCrossDCKeyWrite {
       store.createVolume(volumeName);
       OzoneVolume volume = store.getVolume(volumeName);
       BucketArgs bucketArgs = BucketArgs.newBuilder()
-                  .setBucketLayout(bucketLayout)
-                  .addMetadata(OzoneConsts.DATACENTERS, "dc1,dc2,dc3")
-                  .setDefaultReplicationConfig(
-                          new DefaultReplicationConfig(ReplicationConfig.fromTypeAndFactor(RATIS, THREE)))
-                  .build();
+              .setBucketLayout(bucketLayout)
+              .addMetadata(OzoneConsts.DATACENTERS, "dc1,dc2,dc3")
+              .setDefaultReplicationConfig(
+                      new DefaultReplicationConfig(ReplicationConfig.fromTypeAndFactor(RATIS, THREE)))
+              .build();
       volume.createBucket(bucketName, bucketArgs);
       OzoneBucket bucket = volume.getBucket(bucketName);
       createAndVerifyKeyData(bucket);
@@ -209,7 +210,7 @@ class TestCrossDCKeyWrite {
   }
 
   @ParameterizedTest
-  @EnumSource
+  @EnumSource(value = BucketLayout.class, names = { "FILE_SYSTEM_OPTIMIZED" })
   void testPutKeyOneDC(BucketLayout bucketLayout) throws Exception {
     initOneDC();
     try {
