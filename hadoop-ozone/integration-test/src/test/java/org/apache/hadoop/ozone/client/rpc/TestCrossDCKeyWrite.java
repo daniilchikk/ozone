@@ -91,7 +91,7 @@ class TestCrossDCKeyWrite {
     conf = new OzoneConfiguration();
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "192.168.1.85:0=dc1,192.168.1.85:1=dc2,192.168.1.85:2=dc3");
+    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "localhost:0=dc1,localhost:1=dc2,localhost:2=dc3");
     conf.setBoolean(ScmConfigKeys.OZONE_SCM_PIPELINE_AUTO_CREATE_FACTOR_ONE, false);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(9)
@@ -104,7 +104,7 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "192.168.1.85";
+                  String host = "localhost";
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
@@ -140,7 +140,7 @@ class TestCrossDCKeyWrite {
     conf = new OzoneConfiguration();
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
     conf.set(OZONE_METADATA_DIRS, testDir.getAbsolutePath());
-    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "192.168.1.85:0=dc1");
+    conf.set(OZONE_SCM_DC_DATANODE_MAPPING_KEY, "localhost:0=dc1");
     conf.setBoolean(ScmConfigKeys.OZONE_SCM_PIPELINE_AUTO_CREATE_FACTOR_ONE, false);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(3)
@@ -153,7 +153,7 @@ class TestCrossDCKeyWrite {
           List<String> dns = hddsDatanodes.stream()
                 .map(dn -> {
                   int ratisPort = Integer.parseInt(dn.getConf().get(HDDS_CONTAINER_RATIS_IPC_PORT));
-                  String host = "192.168.1.85";
+                  String host = "localhost";
                   return host + ":" + ratisPort;
                 })
                 .collect(Collectors.toList());
